@@ -261,6 +261,107 @@ function doPickVoice(i){
   if(ok){ setTimeout(doTestVoice, 900); }
 }
 
+/* ---------------- محركات النطق ---------------- */
+var ENGINES = [];
+function currentEngineLabel(){
+  try{
+    if(window.Native && Native.voiceInfo){
+      var o = JSON.parse(Native.voiceInfo() || '{}');
+      if(o && o.engineLabel) return o.engineLabel;
+    }
+  }catch(e){}
+  return 'محرك النظام الافتراضي';
+}
+function loadEngines(){
+  ENGINES = [];
+  try{
+    if(window.Native && Native.listEngines){
+      var raw = JSON.parse(Native.listEngines() || '[]');
+      for(var i = 0; i < raw.length; i++){
+        var e = raw[i] || {};
+        if(!e.pkg) continue;
+        ENGINES.push({
+          pkg: e.pkg,
+          label: e.label || e.pkg,
+          current: !!e.current
+        });
+      }
+    }
+  }catch(e){ ENGINES = []; }
+}
+function doPickEngine(i){
+  var e = ENGINES[i];
+  if(!e){ announce('هذا المحرك غير متاح.', true); return; }
+  var ok = false;
+  try{ if(window.Native && Native.setEngine) ok = Native.setEngine(e.pkg); }catch(e2){}
+  go('settings');
+  announce(ok ? ('تم اختيار محرك النطق: ' + e.label + '. استمع للتجربة بعد لحظة.')
+              : 'تعذر اختيار هذا المحرك.', !ok);
+  if(ok){ setTimeout(doTestVoice, 1800); }
+}
+
+/* ---------------- الصوت السحابي ---------------- */
+var CLOUD_VOICES = [
+  ['Kore','كوري — أنثى هادئة وواضحة'],
+  ['Aoede','أويدي — أنثى خفيفة'],
+  ['Leda','ليدا — أنثى شابة'],
+  ['Zephyr','زفير — أنثى مشرقة'],
+  ['Puck','باك — ذكر مرح'],
+  ['Charon','كارون — ذكر عميق']
+];
+function cloudNameAr(v){
+  for(var i = 0; i < CLOUD_VOICES.length; i++){ if(CLOUD_VOICES[i][0] === v) return CLOUD_VOICES[i][1]; }
+  return v || 'كوري';
+}
+function cloudInfo(){
+  try{
+    if(window.Native && Native.cloudStatus){ return JSON.parse(Native.cloudStatus() || '{}') || {}; }
+  }catch(e){}
+  return {};
+}
+function cloudLabel(){
+  var o = cloudInfo();
+  if(!o.hasKey) return 'مغلق، لم يُحفظ مفتاح بعد.';
+  var state = o.enabled ? 'مفعّل' : 'المفتاح محفوظ لكن الصوت السحابي مغلق';
+  return state + ' — صوت ' + cloudNameAr(o.voice) +
+    (o.keyHint ? ' — المفتاح ينتهي بـ ' + o.keyHint : '');
+}
+function doSaveCloud(){
+  var el = document.getElementById('cloud-key');
+  var key = el && el.value ? el.value.trim() : '';
+  if(!key){
+    var o = cloudInfo();
+    if(o.hasKey){ announce('المفتاح محفوظ بالفعل: ' + cloudLabel()); return; }
+    announce('اكتب مفتاح جيميناي في الخانة الأول، وبعد كده اضغط حفظ.', true);
+    return;
+  }
+  var ok = false;
+  try{ if(window.Native && Native.setCloudKey) ok = Native.setCloudKey(key); }catch(e){}
+  if(el) el.value = '';
+  rerender(ok ? 'تم حفظ المفتاح وتفعيل الصوت السحابي. جارٍ التجربة الآن.' : 'تعذر حفظ المفتاح. تأكد إن التطبيق محدّث.', 'savecloud');
+  if(ok){ setTimeout(doTestCloud, 600); }
+}
+function doTestCloud(){
+  var o = cloudInfo();
+  if(!o.hasKey){ announce('لا يوجد مفتاح محفوظ. الصوت الحالي صوت الهاتف.', true); return; }
+  announce('جارٍ تجربة الصوت السحابي. أول مرة تحتاج ثانية أو اثنتين.');
+  try{ if(window.Native && Native.testCloud){ Native.testCloud(); return; } }catch(e){}
+  announce('النسخة دي مش بتدعم الصوت السحابي.');
+}
+function doClearCloud(){
+  try{ if(window.Native && Native.clearCloudKey) Native.clearCloudKey(); }catch(e){}
+  rerender('تم مسح المفتاح. رجعنا لصوت الهاتف.', 'clearcloud');
+}
+function doPickCloudVoice(i){
+  var v = CLOUD_VOICES[i];
+  if(!v){ announce('هذا الصوت غير متاح.', true); return; }
+  var ok = false;
+  try{ if(window.Native && Native.setCloudVoice) ok = Native.setCloudVoice(v[0]); }catch(e){}
+  go('settings');
+  announce(ok ? 'تم اختيار صوت ' + v[1] + '. استمع للتجربة.' : 'تعذر اختيار الصوت.', !ok);
+  if(ok){ setTimeout(doTestCloud, 600); }
+}
+
 /* ---------------- البيانات ---------------- */
 var ANIMALS = [
   ['hen','الدجاجة',1,'بيض'],
@@ -877,9 +978,21 @@ SCREENS.settings = function(){
     '<button data-act="toggle-tts" data-key="ttts">النطق الصوتي التلقائي: ' + (S.tts ? 'مفعل' : 'مغلق') + '</button>' +
     '<p class="muted">المؤثرات الصوتية تسجيلات حقيقية من مكتبة Mixkit المجانية.</p>' +
     '<h3>صوت النطق</h3>' +
+    '<p class="muted">محرك النطق الحالي: ' + currentEngineLabel() + '</p>' +
     '<p class="muted">الصوت الحالي: ' + voiceLabel() + '</p>' +
+    '<button data-act="list-engines" data-key="listen">اختيار محرك النطق، مثل MultiTTS أو جوجل</button>' +
     '<button data-act="test-voice" data-key="testv">جرّب الصوت الحالي</button>' +
-    '<button data-act="list-voices" data-key="listv">اختيار صوت عربي آخر</button>' +
+    '<button data-act="list-voices" data-key="listv">اختيار صوت عربي آخر داخل المحرك</button>' +
+    '<h3>الصوت السحابي</h3>' +
+    '<p class="muted">صوت أنقى يشتغل على الإنترنت. الصوت الحالي: ' + cloudLabel() + '</p>' +
+    (cloudInfo().hasKey ? '' :
+      '<p class="muted">الصق مفتاح جيميناي في الخانة دي:</p>' +
+      '<input id="cloud-key" type="text" autocomplete="off" aria-label="مفتاح جيميناي" ' +
+      'placeholder="AIza..." class="muted" />') +
+    '<button data-act="save-cloud" data-key="savecloud">حفظ مفتاح جيميناي وتشغيل الصوت السحابي</button>' +
+    '<button data-act="test-cloud" data-key="testcloud">جرّب الصوت السحابي</button>' +
+    '<button data-act="list-cloud-voices" data-key="listcloud">اختيار صوت سحابي آخر</button>' +
+    (cloudInfo().hasKey ? '<button data-act="clear-cloud" data-key="clearcloud">مسح المفتاح والرجوع لصوت الهاتف</button>' : '') +
     '<h3>خيارات أخرى</h3>' +
     '<button data-act="go" data-screen="help" data-key="help2">طريقة اللعب</button>' +
     '<button data-act="reset" data-key="reset">بدء اللعبة من جديد — يمسح كل التقدم</button>' +
@@ -900,6 +1013,32 @@ SCREENS.voices = function(){
   return html;
 };
 
+SCREENS.engines = function(){
+  var html = title('اختيار محرك النطق') +
+    '<p class="muted">دي محركات النطق المتسطبة على هاتفك. اختاري المحرك اللي فيه صوت سلمى، زي MultiTTS، والتطبيق هيقرا بيه. المحرك الحالي: ' + currentEngineLabel() + '.</p>';
+  if(!ENGINES.length){
+    html += '<p>لم تظهر محركات إضافية. لو MultiTTS متسطب، افتحه مرة وشغّل صوت عربي فيه، وبعدين ارجع هنا.</p>';
+  }
+  ENGINES.forEach(function(e, i){
+    html += '<button data-act="pick-engine" data-i="' + i + '" data-key="e' + i + '">' +
+      (e.current ? 'المختار: ' : '') + e.label + '</button>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS.cloudVoices = function(){
+  var cur = cloudInfo().voice || 'Kore';
+  var html = title('اختيار الصوت السحابي') +
+    '<p class="muted">الأصوات دي من جيميناي. الصوت المختار حاليًا: ' + cloudNameAr(cur) + '.</p>';
+  CLOUD_VOICES.forEach(function(v, i){
+    html += '<button data-act="pick-cloud-voice" data-i="' + i + '" data-key="cv' + i + '">' +
+      (v[0] === cur ? 'المختار: ' : '') + v[1] + '</button>';
+  });
+  html += backBtn();
+  return html;
+};
+
 SCREENS.help = function(){
   return title('طريقة اللعب') +
     '<p>هذه لعبة مزرعة كاملة تعمل بالكلام: كل زر يُقرأ بصوت واضح، وكل نتيجة تُعلن فورًا. اسحب إصبعك على الشاشة ليتنقل قارئ الشاشة بين الأزرار، وانقر نقرتين لتفعيل الزر.</p>' +
@@ -911,6 +1050,8 @@ SCREENS.help = function(){
     '<p>تشتري الحيوانات من المتجر، وتطعمها حتى تنتج. اجمع المنتجات من الحظيرة ثم بعها، أو اصنع منها وجبات في المصنع والمطعم.</p>' +
     '<h3>المال</h3>' +
     '<p>تبيع المحاصيل والمنتجات في السوق، وتصنع الملابس والمراتب والعقود في المصنع، وتطبخ في المطعم، وتنشئ محلات تعطيك دخلًا يوميًا. عجلة الحظ والأسئلة تعطيك مكافآت كبيرة مرة كل يوم.</p>' +
+    '<h3>الصوت</h3>' +
+    '<p>التطبيق يقرأ كل زر وكل نتيجة بصوت الهاتف. ولو عندك محرك نطق تاني فيه صوت سلمى، زي MultiTTS، افتح الإعدادات ثم اختيار محرك النطق واختاري المحرك. وفيه كمان صوت سحابي من جيميناي يحتاج إنترنت ومفتاح، ولو النت قطع التطبيق يرجع لصوت الهاتف تلقائيًا.</p>' +
     backBtn();
 };
 
@@ -1271,6 +1412,13 @@ function handle(act, d){
     case 'test-voice': doTestVoice(); return;
     case 'list-voices': loadVoices(); go('voices'); return;
     case 'pick-voice': doPickVoice(parseInt(d.i, 10)); return;
+    case 'save-cloud': doSaveCloud(); return;
+    case 'test-cloud': doTestCloud(); return;
+    case 'clear-cloud': doClearCloud(); return;
+    case 'list-engines': loadEngines(); go('engines'); return;
+    case 'pick-engine': doPickEngine(parseInt(d.i, 10)); return;
+    case 'list-cloud-voices': go('cloudVoices'); return;
+    case 'pick-cloud-voice': doPickCloudVoice(parseInt(d.i, 10)); return;
     case 'reset': doReset(); return;
     case 'exit': doExit(); return;
   }

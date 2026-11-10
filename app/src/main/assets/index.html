@@ -58,6 +58,7 @@
 <header>
   <h1>المزرعة السعيدة</h1>
   <p id="hdr-line">جارٍ التحميل…</p>
+  <button id="read-screen-btn" data-act="read-screen" data-key="read-screen">اقرأ الشاشة</button>
 </header>
 
 <main id="screen" tabindex="-1"></main>
@@ -177,6 +178,87 @@ function announce(text, assertive){
   setTimeout(function(){ box.textContent = text; }, 60);
   speakOut(text);
   showToast(text);
+}
+
+/* ---------------- قراءة الشاشة ---------------- */
+function bodyText(el){
+  return (el && el.textContent ? el.textContent : '').replace(/\s+/g, ' ').trim();
+}
+function screenSummary(){
+  var parts = [];
+  var t = bodyText(screenEl ? screenEl.querySelector('h2') : null);
+  if(t) parts.push(t);
+  var hdr = bodyText(document.getElementById('hdr-line'));
+  if(hdr) parts.push(hdr);
+  var n = screenEl ? screenEl.querySelectorAll('button').length : 0;
+  parts.push('في الشاشة ' + n + ' أزرار. اضغط زرار اقرأ الشاشة في الأعلى لسماع كل المكتوب.');
+  return parts.join('. ');
+}
+function screenFullText(){
+  var parts = [];
+  var last = '';
+  var t = bodyText(screenEl.querySelector('h2'));
+  if(t){ parts.push(t); last = t; }
+  var hdr = bodyText(document.getElementById('hdr-line'));
+  if(hdr && hdr !== last){ parts.push(hdr); last = hdr; }
+  var nodes = screenEl.querySelectorAll('h2, h3, p, button, li, span');
+  for(var i = 0; i < nodes.length; i++){
+    var s = bodyText(nodes[i]);
+    if(!s || s === last) continue;
+    last = s;
+    parts.push(s);
+  }
+  return parts.join('. ');
+}
+function readScreen(){
+  var text = screenFullText();
+  if(!text){ announce('الشاشة فاضية.'); return; }
+  if(!S.tts){
+    try{ if(window.Native && Native.speak){ Native.speak(text); return; } }catch(e){}
+  }
+  announce(text);
+}
+
+/* ---------------- الأصوات ---------------- */
+var VOICES = [];
+function voiceLabel(){
+  try{
+    if(window.Native && Native.voiceInfo){
+      var o = JSON.parse(Native.voiceInfo() || '{}');
+      if(o && o.locale){
+        return (o.network ? 'صوت شبكة يحتاج إنترنت: ' : 'صوت محلي: ') + o.locale;
+      }
+    }
+  }catch(e){}
+  return 'صوت الهاتف الافتراضي';
+}
+function loadVoices(){
+  VOICES = [];
+  try{
+    if(window.Native && Native.listArabicVoices){
+      var raw = JSON.parse(Native.listArabicVoices() || '[]');
+      for(var i = 0; i < raw.length; i++){
+        var v = raw[i];
+        VOICES.push({
+          name: v.name,
+          label: (v.network ? 'شبكة' : 'محلي') + ' — ' + v.locale + ' — ' + v.name
+        });
+      }
+    }
+  }catch(e){ VOICES = []; }
+}
+function doTestVoice(){
+  try{ if(window.Native && Native.testVoice){ Native.testVoice(); return; } }catch(e){}
+  announce('اختبار الصوت: المزرعة السعيدة تعمل بالكلام.');
+}
+function doPickVoice(i){
+  var v = VOICES[i];
+  if(!v){ announce('هذا الصوت غير متاح.', true); return; }
+  var ok = false;
+  try{ if(window.Native && Native.setVoice) ok = Native.setVoice(v.name); }catch(e){}
+  go('settings');
+  announce(ok ? 'تم اختيار الصوت: ' + v.label + '. استمع للصوت الجديد.' : 'تعذر اختيار هذا الصوت على هاتفك.', !ok);
+  if(ok){ setTimeout(doTestVoice, 900); }
 }
 
 /* ---------------- البيانات ---------------- */
@@ -492,6 +574,7 @@ function go(name){
   view = name;
   render();
   window.scrollTo(0,0);
+  announce(screenSummary());
 }
 
 function backBtn(){
@@ -793,11 +876,28 @@ SCREENS.settings = function(){
     '<button data-act="toggle-music" data-key="tmusic">أصوات المزرعة في الخلفية: ' + (S.music ? 'مفعلة' : 'مغلقة') + '</button>' +
     '<button data-act="toggle-tts" data-key="ttts">النطق الصوتي التلقائي: ' + (S.tts ? 'مفعل' : 'مغلق') + '</button>' +
     '<p class="muted">المؤثرات الصوتية تسجيلات حقيقية من مكتبة Mixkit المجانية.</p>' +
+    '<h3>صوت النطق</h3>' +
+    '<p class="muted">الصوت الحالي: ' + voiceLabel() + '</p>' +
+    '<button data-act="test-voice" data-key="testv">جرّب الصوت الحالي</button>' +
+    '<button data-act="list-voices" data-key="listv">اختيار صوت عربي آخر</button>' +
     '<h3>خيارات أخرى</h3>' +
     '<button data-act="go" data-screen="help" data-key="help2">طريقة اللعب</button>' +
     '<button data-act="reset" data-key="reset">بدء اللعبة من جديد — يمسح كل التقدم</button>' +
     '<button data-act="exit" data-key="exit">الخروج من اللعبة</button>' +
     backBtn();
+};
+
+SCREENS.voices = function(){
+  var html = title('اختيار صوت النطق') +
+    '<p class="muted">هذه الأصوات العربية المثبتة على هاتفك. الصوت المحلي يعمل بدون إنترنت، وصوت الشبكة يحتاج اتصالًا.</p>';
+  if(!VOICES.length){
+    html += '<p>لا توجد أصوات عربية إضافية مثبتة على الهاتف. يمكنك تثبيت أصوات عربية من إعدادات النطق في أندرويد.</p>';
+  }
+  VOICES.forEach(function(v, i){
+    html += '<button data-act="pick-voice" data-i="' + i + '" data-key="v' + i + '">' + v.label + '</button>';
+  });
+  html += backBtn();
+  return html;
 };
 
 SCREENS.help = function(){
@@ -1167,6 +1267,10 @@ function handle(act, d){
     case 'toggle-sound': doToggle('sound'); return;
     case 'toggle-music': doToggle('music'); return;
     case 'toggle-tts': doToggle('tts'); return;
+    case 'read-screen': readScreen(); return;
+    case 'test-voice': doTestVoice(); return;
+    case 'list-voices': loadVoices(); go('voices'); return;
+    case 'pick-voice': doPickVoice(parseInt(d.i, 10)); return;
     case 'reset': doReset(); return;
     case 'exit': doExit(); return;
   }

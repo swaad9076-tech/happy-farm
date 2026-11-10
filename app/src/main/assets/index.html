@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>المزرعة السعيدة</title>
+<style>
+  :root{
+    --bg:#12180F; --panel:#1C2417; --panel2:#232D1C; --line:#3A4A2C;
+    --text:#F3F6EA; --muted:#B8C4A6; --accent:#8FD14F; --gold:#F2C94C;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:'Noto Naskh Arabic','Amiri','Segoe UI',Tahoma,sans-serif;
+    font-size:20px;line-height:1.7}
+  body{padding:0 0 40px}
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  header{padding:14px 16px 8px;border-bottom:2px solid var(--line);background:var(--panel)}
+  header h1{margin:0;font-size:26px;color:var(--accent)}
+  #hdr-line{margin:4px 0 0;color:var(--muted);font-size:18px}
+  main{padding:14px 14px 30px;max-width:760px;margin:0 auto}
+  h2{font-size:24px;margin:6px 0 14px;color:var(--gold)}
+  h2:focus{outline:3px solid var(--accent);outline-offset:6px;border-radius:8px}
+  h3{font-size:21px;margin:18px 0 8px;color:var(--accent)}
+  p{margin:0 0 12px}
+  .card{background:var(--panel);border:2px solid var(--line);border-radius:16px;
+    padding:14px;margin:0 0 14px}
+  .big{font-size:22px;color:var(--text)}
+  .muted{color:var(--muted);font-size:18px}
+  button{
+    display:block;width:100%;margin:10px 0;padding:16px 14px;border-radius:14px;
+    border:2px solid var(--line);background:var(--panel2);color:var(--text);
+    font-family:inherit;font-size:21px;line-height:1.4;text-align:right;
+  }
+  button:focus{outline:4px solid var(--accent);outline-offset:3px}
+  button:active{background:#2E3A23}
+  button.primary{background:#2E4A22;border-color:var(--accent);color:#F6FFE9}
+  button.back{background:transparent;border-color:var(--line);color:var(--muted);
+    font-size:19px;padding:12px}
+  .row{display:flex;gap:10px}
+  .row button{flex:1;text-align:center}
+  label{display:block;margin:14px 0 6px;font-size:19px;color:var(--muted)}
+  input,select{width:100%;padding:14px;font-size:20px;border-radius:12px;
+    border:2px solid var(--line);background:var(--panel2);color:var(--text);
+    font-family:inherit}
+  input:focus,select:focus{outline:4px solid var(--accent);outline-offset:2px}
+  .toast{position:fixed;right:10px;left:10px;bottom:14px;background:#2E4A22;
+    border:3px solid var(--accent);border-radius:14px;padding:12px 16px;
+    font-size:19px;display:none;z-index:9}
+  .toast.show{display:block}
+  hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+  .pill{display:inline-block;padding:2px 10px;border:1px solid var(--line);
+    border-radius:20px;font-size:16px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>المزرعة السعيدة</h1>
+  <p id="hdr-line">جارٍ التحميل…</p>
+</header>
+
+<main id="screen" tabindex="-1"></main>
+
+<div id="announcer" class="sr" aria-live="polite" aria-atomic="true"></div>
+<div id="alert" class="sr" aria-live="assertive" aria-atomic="true"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ==========================================================
+   المزرعة السعيدة — لعبة نصية كاملة تعمل مع قارئ الشاشة
+   ========================================================== */
+
+/* ---------------- الصوت ---------------- */
+var AC = null;
+function ac(){
+  if(!AC){ try{ AC = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ AC=null; } }
+  if(AC && AC.state === 'suspended'){ try{ AC.resume(); }catch(e){} }
+  return AC;
+}
+function tone(freq, when, dur, type, vol){
+  var c = ac(); if(!c) return;
+  var o = c.createOscillator(), g = c.createGain();
+  o.type = type || 'sine';
+  o.frequency.value = freq;
+  var t0 = c.currentTime + (when || 0);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol || 0.10, t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + (dur || 0.15));
+  o.connect(g); g.connect(c.destination);
+  o.start(t0); o.stop(t0 + (dur || 0.15) + 0.05);
+}
+var SFX = {
+  click:function(){ if(!S.sound) return; tone(760,0,0.06,'triangle',0.05); },
+  coin:function(){ if(!S.sound) return; tone(1046,0,0.10,'triangle',0.10); tone(1568,0.09,0.16,'triangle',0.08); },
+  buy:function(){ if(!S.sound) return; [523,659,784].forEach(function(f,i){ tone(f,i*0.07,0.14,'sine',0.09); }); },
+  success:function(){ if(!S.sound) return; [523,659,784,1046].forEach(function(f,i){ tone(f,i*0.08,0.20,'sine',0.09); }); },
+  error:function(){ if(!S.sound) return; tone(230,0,0.14,'sawtooth',0.07); tone(180,0.13,0.22,'sawtooth',0.06); },
+  harvest:function(){ if(!S.sound) return; tone(660,0,0.10,'triangle',0.08); tone(880,0.08,0.16,'triangle',0.07); },
+  water:function(){ if(!S.sound) return; tone(420,0,0.20,'sine',0.06); tone(300,0.14,0.24,'sine',0.05); },
+  wheel:function(){ if(!S.sound) return; for(var i=0;i<9;i++) tone(400+i*70,i*0.06,0.09,'square',0.045); },
+  morning:function(){ if(!S.sound) return; [392,523,659,784].forEach(function(f,i){ tone(f,i*0.12,0.35,'sine',0.08); }); }
+};
+
+var musicTimer = null, musicStep = 0;
+var MELODY = [523,587,659,784,659,587,523,440,392,440,523,659];
+function musicTick(){
+  if(!S.music) return;
+  var f = MELODY[musicStep % MELODY.length];
+  tone(f,0,0.9,'sine',0.026);
+  tone(f/2,0.02,1.2,'sine',0.016);
+  musicStep++;
+}
+function musicStart(){ if(musicTimer) return; musicTimer = setInterval(musicTick,1500); musicTick(); }
+function musicStop(){ if(musicTimer){ clearInterval(musicTimer); musicTimer = null; } }
+
+/* ---------------- النطق ---------------- */
+function speakOut(text){
+  if(!text || !S.tts) return;
+  try{ if(window.Native && Native.speak){ Native.speak(text); return; } }catch(e){}
+  try{
+    if(window.speechSynthesis){
+      speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'ar';
+      speechSynthesis.speak(u);
+    }
+  }catch(e){}
+}
+var toastTimer = null;
+function toast(text){
+  var t = document.getElementById('toast');
+  t.textContent = text; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 4500);
+}
+function announce(text, assertive){
+  var box = document.getElementById(assertive ? 'alert' : 'announcer');
+  box.textContent = '';
+  setTimeout(function(){ box.textContent = text; }, 60);
+  speakOut(text);
+  toast(text);
+}
+
+/* ---------------- البيانات ---------------- */
+var ANIMALS = [
+  ['hen','الدجاجة',1,'بيض'],
+  ['dog','الكلب',1,'منتج الكلب'],
+  ['duck','البطة',1,'بيض بطة'],
+  ['cat','القطة',2,'منتج القطة'],
+  ['rabbit','الأرنب',3,'منتج الأرنب'],
+  ['goose','الإوزة',4,'بيض إوز'],
+  ['turkey','الديك الرومي',5,'لحم ديك رومي'],
+  ['sheep','الخروف',10,'صوف'],
+  ['goat','الماعز',12,'لبن ماعز'],
+  ['pigeon','الحمامة',15,'بيض حمام'],
+  ['cow','البقرة',20,'لبن بقرة'],
+  ['buffalo','الجاموسة',25,'لبن جاموس'],
+  ['squirrel','السنجاب',25,'منتج السنجاب'],
+  ['donkey','الحمار',30,'منتج الحمار'],
+  ['mule','البغل',35,'منتج البغل'],
+  ['horse','الحصان',40,'منتج الحصان'],
+  ['bull','الثور',45,'منتج الثور'],
+  ['calf','العجل',45,'لبن عجل'],
+  ['camel','الجمل',50,'لبن جمل'],
+  ['fox','الثعلب',50,'منتج الثعلب'],
+  ['alpaca','الألبكة',55,'صوف ألبكة'],
+  ['llama','اللاما',55,'صوف لاما'],
+  ['sparrow','العصفور',60,'بيض عصفور'],
+  ['owl','البومة',65,'منتج البومة'],
+  ['parrot','الببغاء',70,'ريش ببغاء'],
+  ['stork','اللقلق',75,'منتج اللقلق'],
+  ['pelican','البجعة',75,'منتج البجعة'],
+  ['monkey','القرد',80,'قرد صغير'],
+  ['gazelle','الغزال',85,'منتج الغزال'],
+  ['zebra','الحمار الوحشي',90,'منتج الحمار الوحشي'],
+  ['ostrich','النعامة',90,'ريش نعام'],
+  ['koala','الكوالا',95,'منتج الكوالا'],
+  ['peacock','الطاووس',100,'ريش طاووس'],
+  ['kangaroo','الكنغر',105,'منتج الكنغر'],
+  ['penguin','البطريق',110,'منتج البطريق'],
+  ['falcon','الصقر',120,'منتج الصقر'],
+  ['eagle','النسر',120,'منتج النسر'],
+  ['wolf','الذئب',130,'منتج الذئب'],
+  ['giraffe','الزرافة',150,'منتج الزرافة'],
+  ['bear','الدب',160,'منتج الدب'],
+  ['hippo','فرس النهر',180,'منتج فرس النهر'],
+  ['rhino','وحيد القرن',190,'قرن وحيد القرن'],
+  ['elephant','الفيل',200,'منتج الفيل'],
+  ['panda','الباندا',210,'منتج الباندا'],
+  ['tiger','النمر',280,'منتج النمر'],
+  ['lion','الأسد',300,'منتج الأسد'],
+  ['lioness','اللبؤة',300,'منتج اللبؤة']
+];
+
+var SEEDS = [
+  ['cotton','بذور قطن',5,60,2,'قطن'],
+  ['flax','بذور كتان',10,90,2,'كتان'],
+  ['wheat','بذور قمح',7,60,3,'قمح'],
+  ['tomato','بذور طماطم',6,45,3,'طماطم'],
+  ['cucumber','بذور خيار',7,45,3,'خيار'],
+  ['potato','بذور بطاطس',8,55,4,'بطاطس'],
+  ['onion','بذور بصل',9,55,3,'بصل'],
+  ['carrot','بذور جزر',10,50,3,'جزر'],
+  ['eggplant','بذور باذنجان',11,60,3,'باذنجان'],
+  ['zucchini','بذور كوسة',9,45,3,'كوسة'],
+  ['okra','بذور بامية',13,65,3,'بامية'],
+  ['beans','بذور فاصوليا',14,70,4,'فاصوليا'],
+  ['peas','بذور بازلاء',12,60,4,'بازلاء'],
+  ['watermelon','بذور بطيخ',18,80,2,'بطيخ'],
+  ['melon','بذور شمام',15,75,2,'شمام'],
+  ['strawberry','بذور فراولة',20,70,3,'فراولة'],
+  ['banana','بذور موز',22,90,3,'موز'],
+  ['mango','بذور مانجو',25,100,3,'مانجو'],
+  ['orange','بذور برتقال',20,85,4,'برتقال'],
+  ['lemon','بذور ليمون',18,75,4,'ليمون'],
+  ['grapes','بذور عنب',30,110,3,'عنب'],
+  ['apple','بذور تفاح',24,95,3,'تفاح'],
+  ['pomegranate','بذور رمان',28,105,3,'رمان'],
+  ['rose','بذور ورد',15,60,4,'ورد'],
+  ['jasmine','بذور ياسمين',12,55,4,'ياسمين'],
+  ['tulip','بذور توليب',20,70,3,'توليب'],
+  ['sunflower','بذور عباد الشمس',18,75,3,'عباد الشمس'],
+  ['chrysanthemum','بذور أقحوان',16,65,3,'أقحوان'],
+  ['lavender','بذور لافندر',22,80,3,'لافندر']
+];
+
+var SUPPLIES = [
+  ['thread_thin','خيط رفيع',5],
+  ['thread_mid','خيط متوسط',10],
+  ['thread_thick','خيط سميك',15],
+  ['beads_white','صندوق خرز أبيض',20],
+  ['beads_color','صندوق خرز ملون',25],
+  ['beads_pearl','صندوق خرز لؤلؤ',30],
+  ['beads_crystal','صندوق خرز كريستال',40],
+  ['feed','علف الحيوانات',5],
+  ['fertilizer','سماد',8],
+  ['sugar','سكر',6],
+  ['ghee','سمن',8],
+  ['cheese','جبن',10],
+  ['rice','أرز',7],
+  ['lentils','عدس',6],
+  ['pasta','مكرونة',7],
+  ['nuts','مكسرات',12],
+  ['flour','طحين',9]
+];
+
+var FACTORY_RECIPES = [
+  ['cotton_fabric','قماش قطن',{'crop:cotton':2},{'f:cotton_fabric':1}],
+  ['cotton_clothes','ملابس قطن',{'crop:cotton':3},{'f:cotton_clothes':1}],
+  ['mattress','مرتبة',{'f:cotton_fabric':4,'crop:cotton':4},{'f:mattress':1}],
+  ['flax_clothes','ملابس كتان',{'crop:flax':5},{'f:flax_clothes':1}],
+  ['flax_fabric','قماش كتان',{'crop:flax':2},{'f:flax_fabric':1}],
+  ['bracelet_white','سوار خرز أبيض',{'sup:beads_white':1,'sup:thread_thin':1},{'f:bracelet_white':1}],
+  ['bracelet_pearl','سوار خرز لؤلؤ',{'sup:beads_pearl':1,'sup:thread_thin':1},{'f:bracelet_pearl':1}],
+  ['necklace_pearl','عقد خرز لؤلؤ',{'sup:beads_pearl':1,'sup:thread_thick':1},{'f:necklace_pearl':1}],
+  ['necklace_white','عقد خرز أبيض',{'sup:beads_white':1,'sup:thread_thick':2},{'f:necklace_white':1}],
+  ['flour','طحين',{'crop:wheat':3},{'sup:flour':1}],
+  ['jam','مربى',{'crop:strawberry':3},{'f:jam':1}],
+  ['juice','عصير',{'crop:orange':3},{'f:juice':1}]
+];
+
+var RESTAURANT_RECIPES = [
+  ['koshari','كشري',{'sup:rice':1,'sup:lentils':1,'sup:pasta':1},{'d:koshari':1}],
+  ['basbousa','بسبوسة',{'sup:flour':1,'sup:sugar':1,'sup:ghee':1},{'d:basbousa':1}],
+  ['kunafa','كنافة',{'sup:flour':1,'sup:sugar':1,'sup:cheese':1},{'d:kunafa':1}],
+  ['sandwich','سندوتش',{'crop:cucumber':1,'crop:tomato':1,'sup:cheese':1},{'d:sandwich':1}],
+  ['qatayef','قطايف',{'sup:flour':1,'sup:sugar':1,'sup:nuts':1},{'d:qatayef':1}]
+];
+
+/* سجل كل السلع القابلة للتخزين والبيع */
+var GOODS = {};
+ANIMALS.forEach(function(a){ GOODS['a:'+a[0]] = {name:a[3]}; });
+SEEDS.forEach(function(s){
+  GOODS['seed:'+s[0]] = {name:s[1], buy:s[2]};
+  GOODS['crop:'+s[0]] = {name:s[5]};
+});
+SUPPLIES.forEach(function(s){ GOODS['sup:'+s[0]] = {name:s[1], buy:s[2]}; });
+FACTORY_RECIPES.forEach(function(r){ Object.keys(r[3]).forEach(function(k){ if(!GOODS[k]) GOODS[k]={name:r[1]}; }); });
+GOODS['f:cotton_fabric'] = {name:'قماش قطن', sell:50};
+GOODS['f:flax_fabric'] = {name:'قماش كتان', sell:35};
+GOODS['f:cotton_clothes'] = {name:'ملابس قطن', sell:40};
+GOODS['f:flax_clothes'] = {name:'ملابس كتان', sell:50};
+GOODS['f:mattress'] = {name:'مرتبة', sell:200};
+GOODS['f:bracelet_white'] = {name:'سوار خرز أبيض', sell:45};
+GOODS['f:bracelet_pearl'] = {name:'سوار خرز لؤلؤ', sell:70};
+GOODS['f:necklace_pearl'] = {name:'عقد خرز لؤلؤ', sell:90};
+GOODS['f:necklace_white'] = {name:'عقد خرز أبيض', sell:110};
+GOODS['f:jam'] = {name:'مربى', sell:60};
+GOODS['f:juice'] = {name:'عصير', sell:55};
+GOODS['d:koshari'] = {name:'طبق كشري', sell:120};
+GOODS['d:basbousa'] = {name:'طبق بسبوسة', sell:90};
+GOODS['d:kunafa'] = {name:'طبق كنافة', sell:140};
+GOODS['d:sandwich'] = {name:'سندوتش', sell:80};
+GOODS['d:qatayef'] = {name:'طبق قطايف', sell:150};
+GOODS['a:monkey'] = {name:'قرد صغير', sell:70};
+
+function sellPrice(k){
+  if(GOODS[k] && GOODS[k].sell) return GOODS[k].sell;
+  if(k.indexOf('crop:') === 0){
+    var sd = SEEDS.filter(function(s){ return 'crop:'+s[0] === k; })[0];
+    return sd ? Math.round(sd[2] * 3.5) : 10;
+  }
+  if(k.indexOf('a:') === 0){
+    var an = ANIMALS.filter(function(a){ return 'a:'+a[0] === k; })[0];
+    return an ? Math.max(4, an[2] * 4) : 8;
+  }
+  if(k.indexOf('sup:') === 0){
+    var sp = SUPPLIES.filter(function(s){ return 'sup:'+s[0] === k; })[0];
+    return sp ? Math.max(1, Math.floor(sp[2] / 2)) : 1;
+  }
+  if(k.indexOf('seed:') === 0){
+    var se = SEEDS.filter(function(s){ return 'seed:'+s[0] === k; })[0];
+    return se ? Math.max(1, Math.floor(se[2] / 2)) : 1;
+  }
+  return 5;
+}
+function gname(k){ return (GOODS[k] && GOODS[k].name) || k; }
+
+var QUIZ = [
+  {q:'الفقاسة تحتاج إلى بيضة واحدة لكي تعمل، وتحتاج إلى كم يوم حتى يكتمل إنتاجها؟',
+   o:['يوم واحد','يومان','ثلاثة أيام'], a:1},
+  {q:'كم عدد البيضات التي ينتجها العصفور كل يوم؟',
+   o:['بيضة واحدة','بيضتان','ثلاث بيضات'], a:1},
+  {q:'أي محصول من المحاصيل التالية نحصل منه على ألياف نصنع منها الملابس، وبذره بسعر خمس عملات؟',
+   o:['القطن','الكتان','القمح'], a:0}
+];
+
+/* ---------------- الحالة ---------------- */
+var KEY = 'waad.happyfarm.v1';
+var S = null;
+
+function fresh(){
+  var plots = [];
+  for(var i=0;i<6;i++) plots.push({crop:null, readyAt:0, watered:false});
+  return {
+    coins: 1500,
+    day: 1,
+    inv: {'seed:cotton':2, 'seed:tomato':2, 'sup:thread_thin':2, 'sup:beads_white':1},
+    animals: {'hen':2, 'cow':1},
+    pending: {},
+    plots: plots,
+    barnCap: 100,
+    garden: {readyAt: Date.now() + 180000},
+    orchard: {readyAt: Date.now() + 240000},
+    fed: false,
+    shops: [],
+    wheelDay: 0,
+    quizDay: 0,
+    quizLeft: 3,
+    sound: true,
+    music: false,
+    tts: true,
+    lastProduce: Date.now()
+  };
+}
+function load(){
+  try{
+    var raw = localStorage.getItem(KEY);
+    if(raw){ var st = JSON.parse(raw); if(st && st.plots && st.inv) return st; }
+  }catch(e){}
+  return fresh();
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+
+S = load();
+
+function addItem(k,n){ S.inv[k] = (S.inv[k] || 0) + n; }
+function takeItem(k,n){
+  if((S.inv[k] || 0) < n) return false;
+  S.inv[k] -= n;
+  if(S.inv[k] <= 0) delete S.inv[k];
+  return true;
+}
+function have(k){ return S.inv[k] || 0; }
+function fmt(n){ return Number(n).toLocaleString('en-US'); }
+function animalCount(){
+  var t = 0;
+  for(var k in S.animals) t += S.animals[k];
+  return t;
+}
+function humanMs(ms){
+  if(ms <= 0) return 'جاهز';
+  var s = Math.ceil(ms / 1000);
+  if(s < 60) return s + ' ثانية';
+  var m = Math.floor(s / 60), r = s % 60;
+  return m + ' دقيقة' + (r ? ' و' + r + ' ثانية' : '');
+}
+function goodsList(filterFn){
+  return Object.keys(S.inv).filter(function(k){ return S.inv[k] > 0 && (!filterFn || filterFn(k)); })
+    .sort(function(a,b){ return gname(a).localeCompare(gname(b), 'ar'); });
+}
+
+/* ---------------- التحديث الدوري ---------------- */
+function tick(){
+  var now = Date.now();
+  if(now >= S.garden.readyAt){
+    var flowers = SEEDS.filter(function(s){ return ['rose','jasmine','tulip','sunflower','chrysanthemum','lavender'].indexOf(s[0]) >= 0; });
+    var f = flowers[Math.floor(Math.random()*flowers.length)];
+    addItem('crop:'+f[0], 2);
+    S.garden.readyAt = now + 180000;
+    save();
+  }
+  if(now >= S.orchard.readyAt){
+    var fruits = SEEDS.filter(function(s){ return ['orange','lemon','mango','banana','grapes','apple','pomegranate','strawberry'].indexOf(s[0]) >= 0; });
+    var fr = fruits[Math.floor(Math.random()*fruits.length)];
+    addItem('crop:'+fr[0], 2);
+    S.orchard.readyAt = now + 240000;
+    save();
+  }
+  updateHeader();
+}
+
+/* ---------------- الواجهة ---------------- */
+var screen = 'home';
+var lastKey = '';
+var screenEl = document.getElementById('screen');
+
+function updateHeader(){
+  var ready = S.plots.filter(function(p){ return p.crop && Date.now() >= p.readyAt; }).length;
+  document.getElementById('hdr-line').textContent =
+    'العملات: ' + fmt(S.coins) + ' • اليوم: ' + S.day +
+    ' • الحيوانات: ' + animalCount() + ' من ' + S.barnCap +
+    ' • محاصيل جاهزة: ' + ready;
+}
+
+function render(){
+  var fn = SCREENS[screen] || SCREENS.home;
+  screenEl.innerHTML = fn();
+  updateHeader();
+  var h = screenEl.querySelector('h2');
+  if(h) h.focus();
+}
+
+function rerender(msg, key){
+  var k = key || lastKey;
+  var fn = SCREENS[screen] || SCREENS.home;
+  screenEl.innerHTML = fn();
+  updateHeader();
+  if(k){
+    var b = screenEl.querySelector('[data-key="' + k + '"]');
+    if(b) b.focus();
+  }
+  if(msg) announce(msg);
+  save();
+}
+
+function go(name){
+  screen = name;
+  render();
+  window.scrollTo(0,0);
+}
+
+function backBtn(){
+  return '<button class="back" data-act="go" data-screen="home" data-key="back">رجوع إلى القائمة الرئيسية</button>';
+}
+function title(t){
+  return '<h2 tabindex="-1" data-key="title">' + t + '</h2>';
+}
+
+/* ---------------- الشاشات ---------------- */
+var SCREENS = {};
+
+SCREENS.home = function(){
+  var ready = S.plots.filter(function(p){ return p.crop && Date.now() >= p.readyAt; }).length;
+  var pendingTotal = 0;
+  for(var k in S.pending) pendingTotal += S.pending[k];
+  return title('المزرعة السعيدة') +
+    '<div class="card">' +
+      '<p class="big">رصيدك <b>' + fmt(S.coins) + '</b> عملة. اليوم رقم ' + S.day + '.</p>' +
+      '<p class="muted">الحيوانات: ' + animalCount() + ' من ' + S.barnCap +
+      ' • الأرض: ' + S.plots.length + ' قطعة • محاصيل جاهزة للحصاد: ' + ready +
+      ' • منتجات حيوانات بانتظار الجمع: ' + pendingTotal + '</p>' +
+    '</div>' +
+    '<button class="primary" data-act="new-day" data-key="newday">بدء يوم جديد — ألف عملة وهدايا مجانية</button>' +
+    '<button data-act="go" data-screen="quick" data-key="quick">الإجراءات السريعة</button>' +
+    '<button data-act="go" data-screen="wheel" data-key="wheel">عجلة الحظ</button>' +
+    '<button data-act="go" data-screen="quiz" data-key="quiz">لعبة الأسئلة</button>' +
+    '<button data-act="go" data-screen="shop" data-key="shop">المتجر</button>' +
+    '<button data-act="go" data-screen="land" data-key="land">الأرض والزراعة</button>' +
+    '<button data-act="go" data-screen="garden" data-key="garden">الحديقة والبستان</button>' +
+    '<button data-act="go" data-screen="barn" data-key="barn">الحظيرة</button>' +
+    '<button data-act="go" data-screen="factory" data-key="factory">المصنع</button>' +
+    '<button data-act="go" data-screen="restaurant" data-key="restaurant">المطعم</button>' +
+    '<button data-act="go" data-screen="market" data-key="market">السوق والبيع</button>' +
+    '<button data-act="go" data-screen="shops" data-key="shops">محلاتي</button>' +
+    '<button data-act="go" data-screen="settings" data-key="settings">الإعدادات</button>' +
+    '<button data-act="go" data-screen="help" data-key="help">طريقة اللعب</button>';
+};
+
+SCREENS.quick = function(){
+  return title('الإجراءات السريعة') +
+    '<p class="muted">كل زر يعمل على المزرعة كلها مرة واحدة.</p>' +
+    '<button data-act="water-all" data-key="w">ري جميع المزروعات</button>' +
+    '<button data-act="harvest-all" data-key="h">حصاد جميع المزروعات</button>' +
+    '<button data-act="feed-all" data-key="f">إطعام جميع الحيوانات</button>' +
+    '<button data-act="collect-all" data-key="c">جمع جميع المنتجات</button>' +
+    '<button data-act="go" data-screen="home" data-key="close">إغلاق القائمة</button>';
+};
+
+SCREENS.shop = function(){
+  return title('المتجر') +
+    '<p>رصيدك الآن <b>' + fmt(S.coins) + '</b> عملة.</p>' +
+    '<button data-act="go" data-screen="shop-animals" data-key="sa">قسم الحيوانات</button>' +
+    '<button data-act="go" data-screen="shop-seeds" data-key="ss">قسم البذور والمحاصيل</button>' +
+    '<button data-act="go" data-screen="shop-supplies" data-key="sp">قسم المستلزمات والأدوات</button>' +
+    backBtn();
+};
+
+SCREENS['shop-animals'] = function(){
+  var cap = S.barnCap - animalCount();
+  var html = title('متجر الحيوانات') +
+    '<p class="muted">المكان المتاح في الحظيرة: ' + cap + ' حيوان. رصيدك ' + fmt(S.coins) + ' عملة.</p>';
+  ANIMALS.forEach(function(a){
+    html += '<button data-act="buy-animal" data-id="' + a[0] + '" data-key="ba-' + a[0] + '">' +
+      '<b>' + a[1] + '</b> — السعر ' + fmt(a[2]) + ' عملة، وينتج ' + a[3] + '</button>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS['shop-seeds'] = function(){
+  var html = title('متجر البذور') +
+    '<p class="muted">اشترِ بذرة واحدة أو عشرة بذور بسعر مخفض. رصيدك ' + fmt(S.coins) + ' عملة.</p>';
+  SEEDS.forEach(function(s){
+    html += '<div class="card">' +
+      '<p class="big"><b>' + s[1] + '</b> — البذرة ' + fmt(s[2]) + ' عملة، تنمو في ' + humanMs(s[3]*1000) + ' وتعطي ' + s[4] + ' من ' + s[5] + '</p>' +
+      '<div class="row">' +
+        '<button data-act="buy-seed" data-id="' + s[0] + '" data-qty="1" data-key="bs1-' + s[0] + '">اشترِ واحدة</button>' +
+        '<button data-act="buy-seed" data-id="' + s[0] + '" data-qty="10" data-key="bs10-' + s[0] + '">اشترِ عشرة</button>' +
+      '</div></div>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS['shop-supplies'] = function(){
+  var html = title('متجر المستلزمات') +
+    '<p class="muted">الخيوط والخرز والعلف والسماد ومكوّنات المطبخ. رصيدك ' + fmt(S.coins) + ' عملة.</p>';
+  SUPPLIES.forEach(function(s){
+    html += '<button data-act="buy-supply" data-id="' + s[0] + '" data-key="bsp-' + s[0] + '">' +
+      '<b>' + s[1] + '</b> — ' + fmt(s[2]) + ' عملة. عندك ' + have('sup:'+s[0]) + '</button>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS.land = function(){
+  var now = Date.now();
+  var html = title('الأرض والزراعة') +
+    '<p class="muted">عندك ' + S.plots.length + ' قطعة أرض. القطعة الجديدة بسبعمائة عملة.</p>' +
+    '<button data-act="buy-plot" data-key="buyplot">شراء قطعة أرض جديدة</button>';
+
+  html += '<h3>محاصيلك وأرضك</h3>';
+  S.plots.forEach(function(p,i){
+    if(!p.crop){
+      html += '<button data-act="plot-empty" data-i="' + i + '" data-key="plot-' + i + '">' +
+        'القطعة رقم ' + (i+1) + ': فارغة. ازرع فيها من قسم البذور بالأسفل</button>';
+    }else{
+      var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
+      var ready = now >= p.readyAt;
+      var label = 'القطعة رقم ' + (i+1) + ': ' + (sd ? sd[5] : 'محصول') +
+        (ready ? ' — جاهزة للحصاد' : ' — تنمو، يتبقى ' + humanMs(p.readyAt-now)) +
+        (p.watered ? '، مروية' : '، عطشانة');
+      html += '<div class="card"><p class="big">' + label + '</p><div class="row">' +
+        '<button data-act="plot-water" data-i="' + i + '" data-key="pw-' + i + '">ري</button>' +
+        '<button data-act="plot-harvest" data-i="' + i + '" data-key="ph-' + i + '">حصاد</button>' +
+        '</div></div>';
+    }
+  });
+
+  html += '<h3>ازرع من بذورك</h3>';
+  var anySeed = false;
+  SEEDS.forEach(function(s){
+    var q = have('seed:'+s[0]);
+    if(q <= 0) return;
+    anySeed = true;
+    html += '<div class="card"><p class="big"><b>' + s[1] + '</b> — عندك ' + q + ' بذرة</p>' +
+      '<div class="row">' +
+      '<button data-act="plant-one" data-id="' + s[0] + '" data-key="p1-' + s[0] + '">ازرع بذرة</button>' +
+      '<button data-act="plant-all" data-id="' + s[0] + '" data-key="pa-' + s[0] + '">ازرع الكل</button>' +
+      '</div></div>';
+  });
+  if(!anySeed) html += '<p class="muted">لا توجد بذور في مخزونك. اشترِ من المتجر.</p>';
+
+  html += backBtn();
+  return html;
+};
+
+SCREENS.garden = function(){
+  var now = Date.now();
+  return title('الحديقة والبستان') +
+    '<p class="muted">الحديقة والبستان يعملان وحدهما: كل فترة ينتجان محصولًا جديدًا ويضعانه في مخزونك تلقائيًا.</p>' +
+    '<div class="card"><p class="big">الحديقة: ' +
+      (now >= S.garden.readyAt ? 'المحصول جاهز وتم جمعه' : 'المحصول القادم بعد ' + humanMs(S.garden.readyAt-now)) +
+    '</p><p class="muted">تنتج الزهور كل ثلاث دقائق، حبتين في كل مرة.</p></div>' +
+    '<div class="card"><p class="big">البستان: ' +
+      (now >= S.orchard.readyAt ? 'الثمرة جاهزة وتم جمعها' : 'الثمرة القادمة بعد ' + humanMs(S.orchard.readyAt-now)) +
+    '</p><p class="muted">ينتج الفواكه كل أربع دقائق، حبتين في كل مرة.</p></div>' +
+    '<p>محاصيلك من الزهور والفواكه تجدها في السوق للبيع.</p>' +
+    backBtn();
+};
+
+SCREENS.barn = function(){
+  var cap = S.barnCap, used = animalCount();
+  var html = title('الحظيرة') +
+    '<div class="card"><p class="big">السعة: ' + used + ' من ' + cap + ' حيوان.</p>' +
+    '<p class="muted">' + (S.fed ? 'الحيوانات أكلت اليوم وتنتج الآن.' : 'الحيوانات جائعة. أطعمها من الإجراءات السريعة حتى تنتج.') + '</p></div>' +
+    '<button data-act="expand-barn" data-key="expand">توسيع الحظيرة — ألفا عملة، تضيف أحد عشر مكانًا</button>';
+
+  var owned = Object.keys(S.animals).filter(function(k){ return S.animals[k] > 0; });
+  if(owned.length === 0){
+    html += '<p class="muted">لا توجد حيوانات بعد. اشترِ من متجر الحيوانات.</p>';
+  }
+  owned.forEach(function(id){
+    var a = ANIMALS.filter(function(x){ return x[0] === id; })[0];
+    if(!a) return;
+    var n = S.animals[id], pend = S.pending[id] || 0;
+    html += '<div class="card">' +
+      '<p class="big"><b>' + a[1] + '</b> — العدد ' + n + '، ينتج ' + a[3] + '</p>' +
+      '<p class="muted">منتجات جاهزة للجمع: ' + pend + '، وفي المخزون: ' + have('a:'+id) + '</p>' +
+      '<div class="row">' +
+        '<button data-act="barn-collect" data-id="' + id + '" data-key="bc-' + id + '">اجمع المنتجات</button>' +
+        '<button data-act="barn-sell" data-id="' + id + '" data-key="bs-' + id + '">بيع</button>' +
+      '</div>' +
+      '<button data-act="barn-food" data-id="' + id + '" data-key="bf-' + id + '">إعداد طعام: ثلاثة منتجات تصبح وجبة أغلى</button>' +
+      '</div>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS.factory = function(){
+  var html = title('المصنع') +
+    '<p class="muted">حوّل المحاصيل والخيوط والخرز إلى منتجات مصنوعة، ثم بعها في السوق بأرباح أكبر.</p>';
+  FACTORY_RECIPES.forEach(function(r){
+    var ok = true, need = [];
+    for(var k in r[2]){
+      var q = have(k);
+      if(q < r[2][k]) ok = false;
+      need.push(gname(k) + ' ' + r[2][k] + ' من ' + q);
+    }
+    html += '<div class="card"><p class="big"><b>' + r[1] + '</b></p>' +
+      '<p class="muted">يحتاج: ' + need.join('، ') + '</p>' +
+      '<button data-act="craft" data-id="' + r[0] + '" data-key="cr-' + r[0] + '"' + (ok ? ' class="primary"' : '') + '>' +
+      (ok ? 'اصنع' : 'المكوّنات غير كافية') + '</button></div>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS.restaurant = function(){
+  var html = title('المطعم') +
+    '<p class="muted">اطبخ الأطباق من مكوّناتك ثم بعها في السوق.</p>';
+  RESTAURANT_RECIPES.forEach(function(r){
+    var ok = true, need = [];
+    for(var k in r[2]){
+      var q = have(k);
+      if(q < r[2][k]) ok = false;
+      need.push(gname(k) + ' ' + r[2][k] + ' من ' + q);
+    }
+    html += '<div class="card"><p class="big"><b>' + r[1] + '</b></p>' +
+      '<p class="muted">يحتاج: ' + need.join('، ') + '</p>' +
+      '<button data-act="cook" data-id="' + r[0] + '" data-key="ck-' + r[0] + '"' + (ok ? ' class="primary"' : '') + '>' +
+      (ok ? 'اطبخ' : 'المكوّنات غير كافية') + '</button></div>';
+  });
+  html += backBtn();
+  return html;
+};
+
+SCREENS.market = function(){
+  var list = goodsList(function(k){ return sellPrice(k) > 0; });
+  var html = title('السوق والبيع') +
+    '<p class="muted">بع ما عندك. رصيدك ' + fmt(S.coins) + ' عملة.</p>';
+  if(list.length === 0){
+    html += '<p class="muted">المخزون فارغ. ازرع واحصد واجمع من الحظيرة أولًا.</p>';
+  }
+  list.forEach(function(k){
+    var q = have(k), pr = sellPrice(k);
+    html += '<div class="card"><p class="big"><b>' + gname(k) + '</b> — عندك ' + q + '، سعر الوحدة ' + fmt(pr) + '</p>' +
+      '<div class="row">' +
+      '<button data-act="sell" data-key="' + k + '" data-qty="1">بيع واحدة</button>' +
+      '<button data-act="sell" data-key="' + k + '" data-qty="10">بيع عشرة</button>' +
+      '<button data-act="sell" data-key="' + k + '" data-qty="all">بيع الكل</button>' +
+      '</div></div>';
+  });
+  html += '<h3>المتجر</h3>' +
+    '<button data-act="go" data-screen="shop" data-key="goshop">فتح المتجر للشراء</button>' +
+    '<button data-act="go" data-screen="shops" data-key="goshops">محلاتي</button>' +
+    backBtn();
+  return html;
+};
+
+SCREENS.shops = function(){
+  var html = title('محلاتي') +
+    '<p class="muted">أنشئ محلًا باسمك واختر نوعه؛ كل محل يعطيك مئتي عملة كل يوم جديد.</p>';
+  if(S.shops.length){
+    S.shops.forEach(function(sh,i){
+      html += '<div class="card"><p class="big"><b>' + sh.name + '</b> — ' + sh.cat + '</p></div>';
+    });
+  }else{
+    html += '<p class="muted">لا توجد محلات بعد.</p>';
+  }
+  html += '<h3>إنشاء محل جديد</h3>' +
+    '<label for="shop-name">اسم المحل</label>' +
+    '<input id="shop-name" type="text" placeholder="اكتب اسم المحل">' +
+    '<label for="shop-cat">نوع المحل</label>' +
+    '<select id="shop-cat">' +
+      '<option>إكسسوارات</option><option>بذور</option>' +
+      '<option>أجبان وألبان</option><option>منتجات مصنوعة</option>' +
+    '</select>' +
+    '<button class="primary" data-act="create-shop" data-key="createshop">حفظ المحل</button>' +
+    backBtn();
+  return html;
+};
+
+SCREENS.wheel = function(){
+  var used = S.wheelDay === S.day;
+  return title('عجلة الحظ') +
+    '<p class="muted">جرب حظك مرة واحدة كل يوم. الجائزة الكبرى خمسمئة مليون عملة.</p>' +
+    '<div class="card"><p class="big">' + (used ? 'جربت حظك اليوم، عد غدًا بعد بدء يوم جديد.' : 'العجلة تدور باسمك اليوم.') + '</p></div>' +
+    '<button class="primary" data-act="wheel-spin" data-key="spin"' + (used ? ' disabled' : '') + '>أدر العجلة</button>' +
+    backBtn();
+};
+
+SCREENS.quiz = function(){
+  if(S.quizDay !== S.day){ S.quizDay = S.day; S.quizLeft = 3; }
+  var idx = 3 - S.quizLeft;
+  var html = title('لعبة الأسئلة') +
+    '<p class="muted">ثلاثة أسئلة كل يوم، وكل إجابة صحيحة تعطيك مليون عملة.</p>';
+  if(S.quizLeft <= 0){
+    html += '<p class="big">أجبت على أسئلة اليوم. عد غدًا بعد بدء يوم جديد.</p>';
+  }else{
+    var q = QUIZ[idx];
+    html += '<div class="card"><p class="big">السؤال رقم ' + (idx+1) + ' من ثلاثة</p>' +
+      '<p class="big">' + q.q + '</p></div>';
+    q.o.forEach(function(opt, i){
+      html += '<button data-act="quiz-answer" data-i="' + i + '" data-key="qa-' + i + '">' + opt + '</button>';
+    });
+    html += '<p class="muted">بقي لك ' + S.quizLeft + ' أسئلة اليوم.</p>';
+  }
+  html += backBtn();
+  return html;
+};
+
+SCREENS.settings = function(){
+  return title('الإعدادات') +
+    '<p class="muted">هذه اللعبة مجانية بالكامل، وتعمل مع قارئ الشاشة دون أي صور تعتمد عليها.</p>' +
+    '<button data-act="toggle-sound" data-key="tsound">المؤثرات الصوتية: ' + (S.sound ? 'مفعلة' : 'مغلقة') + '</button>' +
+    '<button data-act="toggle-music" data-key="tmusic">الموسيقى الخلفية: ' + (S.music ? 'مفعلة' : 'مغلقة') + '</button>' +
+    '<button data-act="toggle-tts" data-key="ttts">النطق الصوتي التلقائي: ' + (S.tts ? 'مفعل' : 'مغلق') + '</button>' +
+    '<h3>خيارات أخرى</h3>' +
+    '<button data-act="go" data-screen="help" data-key="help2">طريقة اللعب</button>' +
+    '<button data-act="reset" data-key="reset">بدء اللعبة من جديد — يمسح كل التقدم</button>' +
+    '<button data-act="exit" data-key="exit">الخروج من اللعبة</button>' +
+    backBtn();
+};
+
+SCREENS.help = function(){
+  return title('طريقة اللعب') +
+    '<p>هذه لعبة مزرعة كاملة تعمل بالكلام: كل زر يُقرأ بصوت واضح، وكل نتيجة تُعلن فورًا. اسحب إصبعك على الشاشة ليتنقل قارئ الشاشة بين الأزرار، وانقر نقرتين لتفعيل الزر.</p>' +
+    '<h3>ابدأ يومك</h3>' +
+    '<p>اضغط بدء يوم جديد: تأخذ ألف عملة وهدايا من كل نوع، ثم اذهب إلى الإجراءات السريعة: اروِ الزرع، احصد، أطعم الحيوانات، واجمع المنتجات.</p>' +
+    '<h3>الزراعة</h3>' +
+    '<p>اشترِ بذورًا من المتجر، ثم ازرعها في الأرض. البذرة تنمو في وقت محدد، والري يقصّر الوقت. الحديقة والبستان ينتجان وحدهما كل بضع دقائق.</p>' +
+    '<h3>الحيوانات</h3>' +
+    '<p>تشتري الحيوانات من المتجر، وتطعمها حتى تنتج. اجمع المنتجات من الحظيرة ثم بعها، أو اصنع منها وجبات في المصنع والمطعم.</p>' +
+    '<h3>المال</h3>' +
+    '<p>تبيع المحاصيل والمنتجات في السوق، وتصنع الملابس والمراتب والعقود في المصنع، وتطبخ في المطعم، وتنشئ محلات تعطيك دخلًا يوميًا. عجلة الحظ والأسئلة تعطيك مكافآت كبيرة مرة كل يوم.</p>' +
+    backBtn();
+};
+
+/* ---------------- الأفعال ---------------- */
+function feedCost(){ return animalCount() * 2; }
+
+function doWaterAll(){
+  var n = 0;
+  S.plots.forEach(function(p){
+    if(p.crop && !p.watered && Date.now() < p.readyAt){
+      p.watered = true;
+      p.readyAt = Date.now() + Math.max(1000, (p.readyAt - Date.now()) * 0.8);
+      n++;
+    }
+  });
+  if(n){ SFX.water(); rerender('رويت ' + n + ' قطعة زرع، وسرّعت نموها.', 'w'); }
+  else { SFX.error(); announce('لا توجد مزروعات تحتاج ريًا الآن.', true); }
+}
+
+function doHarvestAll(){
+  var n = 0, total = 0;
+  S.plots.forEach(function(p){
+    if(p.crop && Date.now() >= p.readyAt){
+      var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
+      if(sd){ addItem('crop:'+sd[0], sd[4]); total += sd[4]; }
+      p.crop = null; p.readyAt = 0; p.watered = false;
+      n++;
+    }
+  });
+  if(n){ SFX.harvest(); rerender('حصت ' + n + ' قطعة، وأضفت ' + total + ' وحدة إلى المخزون.', 'h'); }
+  else { SFX.error(); announce('لا يوجد محصول جاهز للحصاد الآن.', true); }
+}
+
+function doFeedAll(){
+  if(animalCount() === 0){ SFX.error(); announce('لا توجد حيوانات في الحظيرة.', true); return; }
+  if(S.fed){ announce('الحيوانات أكلت اليوم بالفعل وتنتج الآن.', false); return; }
+  var cost = feedCost();
+  if(S.coins < cost){ SFX.error(); announce('تحتاج ' + fmt(cost) + ' عملة لإطعام كل الحيوانات. رصيدك ' + fmt(S.coins) + '.', true); return; }
+  S.coins -= cost;
+  S.fed = true;
+  S.lastProduce = Date.now();
+  SFX.success();
+  rerender('أطعمت كل الحيوانات مقابل ' + fmt(cost) + ' عملة. ستبدأ الإنتاج الآن.', 'f');
+}
+
+function collectAnimal(id){
+  var pend = S.pending[id] || 0;
+  if(pend <= 0) return 0;
+  addItem('a:'+id, pend);
+  S.pending[id] = 0;
+  return pend;
+}
+function doCollectAll(){
+  var total = 0;
+  Object.keys(S.pending).forEach(function(id){ total += collectAnimal(id); });
+  if(total){ SFX.coin(); rerender('جمعت ' + total + ' منتجًا من الحيوانات إلى المخزون.', 'c'); }
+  else { SFX.error(); announce('لا توجد منتجات جاهزة. تأكد أن الحيوانات أكلت وانتظر قليلًا.', true); }
+}
+
+function doNewDay(){
+  S.day += 1;
+  S.coins += 1000;
+  SUPPLIES.forEach(function(s){ addItem('sup:'+s[0], 3); });
+  SEEDS.forEach(function(s){ addItem('seed:'+s[0], 3); });
+  ANIMALS.forEach(function(a){ addItem('a:'+a[0], 3); });
+  SEEDS.forEach(function(s){ addItem('crop:'+s[0], 3); });
+  S.fed = false;
+  S.quizDay = S.day; S.quizLeft = 3;
+  S.wheelDay = 0;
+  S.pending = {};
+  S.lastProduce = Date.now();
+  if(S.shops.length) S.coins += S.shops.length * 200;
+  SFX.morning();
+  save();
+  rerender('بدأ اليوم رقم ' + S.day + '. أضفت ألف عملة وثلاث وحدات من كل بذرة ومستلزم وحيوان ومحصول.' +
+    (S.shops.length ? ' ومحلاتك أعطتك ' + fmt(S.shops.length*200) + ' عملة.' : ''), 'newday');
+}
+
+function doBuyAnimal(id){
+  var a = ANIMALS.filter(function(x){ return x[0] === id; })[0];
+  if(!a) return;
+  if(animalCount() >= S.barnCap){ SFX.error(); announce('الحظيرة ممتلئة. وسّعها أولًا.', true); return; }
+  if(S.coins < a[2]){ SFX.error(); announce('رصيدك لا يكفي. سعر ' + a[1] + ' هو ' + fmt(a[2]) + ' عملة.', true); return; }
+  S.coins -= a[2];
+  S.animals[id] = (S.animals[id] || 0) + 1;
+  SFX.buy();
+  rerender('اشتريت ' + a[1] + '. عندك الآن ' + S.animals[id] + '. رصيدك ' + fmt(S.coins) + ' عملة.', 'ba-'+id);
+}
+
+function doBuySeed(id, qty){
+  var s = SEEDS.filter(function(x){ return x[0] === id; })[0];
+  if(!s) return;
+  var price = qty === 10 ? Math.round(s[2] * 9) : s[2];
+  if(S.coins < price){ SFX.error(); announce('رصيدك لا يكفي. السعر ' + fmt(price) + ' عملة.', true); return; }
+  S.coins -= price;
+  addItem('seed:'+id, qty);
+  SFX.buy();
+  rerender('اشتريت ' + qty + ' من ' + s[1] + ' مقابل ' + fmt(price) + ' عملة.', 'bs'+(qty===10?'10':'1')+'-'+id);
+}
+
+function doBuySupply(id){
+  var s = SUPPLIES.filter(function(x){ return x[0] === id; })[0];
+  if(!s) return;
+  if(S.coins < s[2]){ SFX.error(); announce('رصيدك لا يكفي. السعر ' + fmt(s[2]) + ' عملة.', true); return; }
+  S.coins -= s[2];
+  addItem('sup:'+id, 1);
+  SFX.buy();
+  rerender('اشتريت ' + s[1] + '. عندك الآن ' + have('sup:'+id) + '.', 'bsp-'+id);
+}
+
+function doBuyPlot(){
+  var price = 700 + (S.plots.length - 6) * 300;
+  if(S.plots.length >= 15){ SFX.error(); announce('وصلت إلى أقصى عدد قطع الأرض.', true); return; }
+  if(S.coins < price){ SFX.error(); announce('تحتاج ' + fmt(price) + ' عملة لشراء قطعة أرض.', true); return; }
+  S.coins -= price;
+  S.plots.push({crop:null, readyAt:0, watered:false});
+  SFX.buy();
+  rerender('اشتريت قطعة أرض جديدة. عندك الآن ' + S.plots.length + ' قطعة.', 'buyplot');
+}
+
+function doPlant(id, all){
+  var sd = SEEDS.filter(function(x){ return x[0] === id; })[0];
+  if(!sd) return;
+  var planted = 0, empty = 0;
+  S.plots.forEach(function(p){ if(!p.crop) empty++; });
+  if(empty === 0){ SFX.error(); announce('كل الأرض مزروعة. احصد أولًا.', true); return; }
+  var limit = all ? Math.min(empty, have('seed:'+id)) : Math.min(1, have('seed:'+id));
+  if(limit <= 0){ SFX.error(); announce('لا توجد بذور من هذا النوع.', true); return; }
+  for(var i=0;i<S.plots.length && planted<limit;i++){
+    var p = S.plots[i];
+    if(p.crop) continue;
+    if(!takeItem('seed:'+id, 1)) break;
+    p.crop = id;
+    p.readyAt = Date.now() + sd[3]*1000;
+    p.watered = false;
+    planted++;
+  }
+  SFX.harvest();
+  rerender('زرعت ' + planted + ' من ' + sd[1] + '. ستنمو في ' + humanMs(sd[3]*1000) + '.', all ? 'pa-'+id : 'p1-'+id);
+}
+
+function doPlotWater(i){
+  var p = S.plots[i];
+  if(!p || !p.crop) return;
+  if(p.watered){ SFX.error(); announce('هذه القطعة مروية بالفعل.', true); return; }
+  p.watered = true;
+  p.readyAt = Date.now() + Math.max(1000, (p.readyAt - Date.now()) * 0.8);
+  SFX.water();
+  rerender('رويت القطعة رقم ' + (i+1) + '. يتبقى ' + humanMs(p.readyAt-Date.now()) + '.', 'pw-'+i);
+}
+
+function doPlotHarvest(i){
+  var p = S.plots[i];
+  if(!p || !p.crop) return;
+  if(Date.now() < p.readyAt){ SFX.error(); announce('المحصول لم ينضج بعد. يتبقى ' + humanMs(p.readyAt-Date.now()) + '.', true); return; }
+  var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
+  var qty = sd ? sd[4] : 1;
+  addItem('crop:'+p.crop, qty);
+  p.crop = null; p.readyAt = 0; p.watered = false;
+  SFX.harvest();
+  rerender('حصت القطعة رقم ' + (i+1) + ' وأضفت ' + qty + ' ' + (sd ? sd[5] : 'وحدة') + ' إلى المخزون.', 'ph-'+i);
+}
+
+function doWheel(){
+  if(S.wheelDay === S.day){ SFX.error(); announce('جربت حظك اليوم بالفعل. عد بعد يوم جديد.', true); return; }
+  S.wheelDay = S.day;
+  S.coins += 500000000;
+  SFX.wheel();
+  setTimeout(function(){ SFX.coin(); }, 600);
+  save();
+  rerender('مليون مبروك! العجلة أعطتك خمسمئة مليون عملة. رصيدك الآن ' + fmt(S.coins) + '.', 'spin');
+}
+
+function doQuiz(i){
+  if(S.quizLeft <= 0) return;
+  var idx = 3 - S.quizLeft;
+  var q = QUIZ[idx];
+  if(i === q.a){
+    S.coins += 1000000;
+    S.quizLeft -= 1;
+    SFX.coin();
+    save();
+    if(S.quizLeft <= 0){
+      rerender('إجابة صحيحة! أضفت مليون عملة. أكملت أسئلة اليوم. رصيدك ' + fmt(S.coins) + '.', 'qa-'+i);
+    }else{
+      rerender('إجابة صحيحة! أضفت مليون عملة. رصيدك ' + fmt(S.coins) + '. السؤال التالي.', 'qa-'+i);
+    }
+  }else{
+    SFX.error();
+    announce('إجابة غير صحيحة. الإجابة الصحيحة هي: ' + q.o[q.a] + '.', true);
+  }
+}
+
+function doCraft(id){
+  var r = FACTORY_RECIPES.filter(function(x){ return x[0] === id; })[0];
+  if(!r) return;
+  for(var k in r[2]) if(have(k) < r[2][k]){ SFX.error(); announce('المكوّنات غير كافية لصنع ' + r[1] + '.', true); return; }
+  for(var k2 in r[2]) takeItem(k2, r[2][k2]);
+  for(var o in r[3]) addItem(o, r[3][o]);
+  SFX.success();
+  rerender('صنعت ' + r[1] + '. ستجده في السوق للبيع.', 'cr-'+id);
+}
+
+function doCook(id){
+  var r = RESTAURANT_RECIPES.filter(function(x){ return x[0] === id; })[0];
+  if(!r) return;
+  for(var k in r[2]) if(have(k) < r[2][k]){ SFX.error(); announce('المكوّنات غير كافية لطبخ ' + r[1] + '.', true); return; }
+  for(var k2 in r[2]) takeItem(k2, r[2][k2]);
+  for(var o in r[3]) addItem(o, r[3][o]);
+  SFX.success();
+  rerender('طبخت ' + r[1] + '. ستجده في السوق للبيع.', 'ck-'+id);
+}
+
+function doSell(key, qty){
+  var n = have(key);
+  if(n <= 0){ SFX.error(); announce('لا يوجد من هذا المنتج في المخزون.', true); return; }
+  var sellN = qty === 'all' ? n : Math.min(n, parseInt(qty, 10));
+  if(sellN <= 0) return;
+  var total = sellN * sellPrice(key);
+  takeItem(key, sellN);
+  S.coins += total;
+  SFX.coin();
+  save();
+  rerender('بعت ' + sellN + ' من ' + gname(key) + ' مقابل ' + fmt(total) + ' عملة. رصيدك ' + fmt(S.coins) + '.', key);
+}
+
+function doExpandBarn(){
+  if(S.barnCap >= 111){ SFX.error(); announce('الحظيرة وصلت إلى أقصى سعة أحد عشر ومئة.', true); return; }
+  if(S.coins < 2000){ SFX.error(); announce('تحتاج ألفي عملة لتوسيع الحظيرة.', true); return; }
+  S.coins -= 2000;
+  S.barnCap = Math.min(111, S.barnCap + 11);
+  SFX.buy();
+  rerender('وسعت الحظيرة. السعة الآن ' + S.barnCap + ' حيوان.', 'expand');
+}
+
+function doBarnCollect(id){
+  var n = collectAnimal(id);
+  if(n > 0){ SFX.coin(); rerender('جمعت ' + n + ' منتجًا.', 'bc-'+id); }
+  else { SFX.error(); announce('لا توجد منتجات جاهزة لهذا الحيوان.', true); }
+}
+
+function doBarnSell(id){
+  var a = ANIMALS.filter(function(x){ return x[0] === id; })[0];
+  var n = (S.pending[id] || 0) + have('a:'+id);
+  if(n <= 0){ SFX.error(); announce('لا يوجد منتج لبيعه.', true); return; }
+  var unit = sellPrice('a:'+id);
+  var max = Math.min(n, Math.floor(2000 / unit) || 1);
+  var total = max * unit;
+  var fromPending = Math.min(S.pending[id] || 0, max);
+  S.pending[id] = (S.pending[id] || 0) - fromPending;
+  takeItem('a:'+id, max - fromPending);
+  S.coins += total;
+  SFX.coin();
+  rerender('بعت ' + max + ' من ' + a[3] + ' مقابل ' + fmt(total) + ' عملة. رصيدك ' + fmt(S.coins) + '.', 'bs-'+id);
+}
+
+function doBarnFood(id){
+  var a = ANIMALS.filter(function(x){ return x[0] === id; })[0];
+  var n = (S.pending[id] || 0) + have('a:'+id);
+  if(n < 3){ SFX.error(); announce('تحتاج ثلاثة منتجات على الأقل لإعداد وجبة.', true); return; }
+  var fromPending = Math.min(S.pending[id] || 0, 3);
+  S.pending[id] = (S.pending[id] || 0) - fromPending;
+  takeItem('a:'+id, 3 - fromPending);
+  addItem('d:'+id, 1);
+  GOODS['d:'+id] = {name:'وجبة ' + a[1], sell: sellPrice('a:'+id) * 3};
+  SFX.success();
+  rerender('أعددت وجبة من ' + a[1] + '. قيمتها أعلى، وستجدها في السوق.', 'bf-'+id);
+}
+
+function doCreateShop(){
+  var nameEl = document.getElementById('shop-name');
+  var catEl = document.getElementById('shop-cat');
+  var name = (nameEl && nameEl.value || '').trim();
+  var cat = catEl ? catEl.value : 'إكسسوارات';
+  if(!name){ SFX.error(); announce('اكتب اسم المحل أولًا.', true); return; }
+  S.shops.push({name:name, cat:cat});
+  SFX.success();
+  save();
+  screen = 'shops';
+  render();
+  announce('تم إنشاء محل ' + name + ' في قسم ' + cat + '. سيعطيك مئتي عملة كل يوم جديد.');
+}
+
+function doToggle(which){
+  if(which === 'sound'){ S.sound = !S.sound; SFX.click(); }
+  if(which === 'music'){
+    S.music = !S.music;
+    if(S.music) musicStart(); else musicStop();
+  }
+  if(which === 'tts'){
+    S.tts = !S.tts;
+    if(!S.tts){ try{ if(window.Native && Native.stopSpeaking) Native.stopSpeaking(); }catch(e){}
+      try{ if(window.speechSynthesis) speechSynthesis.cancel(); }catch(e){} }
+  }
+  save();
+  var msg = which === 'sound' ? ('المؤثرات الصوتية ' + (S.sound ? 'مفعلة' : 'مغلقة') + '.')
+          : which === 'music' ? ('الموسيقى الخلفية ' + (S.music ? 'مفعلة' : 'مغلقة') + '.')
+          : ('النطق التلقائي ' + (S.tts ? 'مفعل' : 'مغلق') + '.');
+  rerender(msg, which === 'sound' ? 'tsound' : which === 'music' ? 'tmusic' : 'ttts');
+}
+
+var resetArmed = false;
+function doReset(){
+  if(!resetArmed){
+    resetArmed = true;
+    setTimeout(function(){ resetArmed = false; }, 8000);
+    announce('تحذير: هذا يمسح كل تقدمك. اضغط الزر مرة أخرى خلال ثماني ثوان للتأكيد.', true);
+    return;
+  }
+  resetArmed = false;
+  S = fresh();
+  save();
+  screen = 'home';
+  render();
+  SFX.morning();
+  announce('بدأت اللعبة من جديد. رصيدك ألف وخمسمئة عملة.');
+}
+
+function doExit(){
+  try{
+    if(window.Native && Native.finishApp){ Native.finishApp(); return; }
+  }catch(e){}
+  announce('للخروج، اضغط زر الرجوع في هاتفك.');
+}
+
+/* ---------------- الموجّه ---------------- */
+function handle(act, d){
+  switch(act){
+    case 'go': go(d.screen); return;
+    case 'water-all': doWaterAll(); return;
+    case 'harvest-all': doHarvestAll(); return;
+    case 'feed-all': doFeedAll(); return;
+    case 'collect-all': doCollectAll(); return;
+    case 'new-day': doNewDay(); return;
+    case 'buy-animal': doBuyAnimal(d.id); return;
+    case 'buy-seed': doBuySeed(d.id, parseInt(d.qty, 10)); return;
+    case 'buy-supply': doBuySupply(d.id); return;
+    case 'buy-plot': doBuyPlot(); return;
+    case 'plant-one': doPlant(d.id, false); return;
+    case 'plant-all': doPlant(d.id, true); return;
+    case 'plot-water': doPlotWater(parseInt(d.i, 10)); return;
+    case 'plot-harvest': doPlotHarvest(parseInt(d.i, 10)); return;
+    case 'plot-empty': announce('هذه القطعة فارغة. اختر بذرة من قسم ازرع من بذورك بالأسفل.'); return;
+    case 'expand-barn': doExpandBarn(); return;
+    case 'barn-collect': doBarnCollect(d.id); return;
+    case 'barn-sell': doBarnSell(d.id); return;
+    case 'barn-food': doBarnFood(d.id); return;
+    case 'craft': doCraft(d.id); return;
+    case 'cook': doCook(d.id); return;
+    case 'sell': doSell(d.key, d.qty); return;
+    case 'create-shop': doCreateShop(); return;
+    case 'wheel-spin': doWheel(); return;
+    case 'quiz-answer': doQuiz(parseInt(d.i, 10)); return;
+    case 'toggle-sound': doToggle('sound'); return;
+    case 'toggle-music': doToggle('music'); return;
+    case 'toggle-tts': doToggle('tts'); return;
+    case 'reset': doReset(); return;
+    case 'exit': doExit(); return;
+  }
+}
+
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('[data-act]') : null;
+  if(!b) return;
+  lastKey = b.getAttribute('data-key') || lastKey;
+  SFX.click();
+  handle(b.getAttribute('data-act'), b.dataset);
+});
+
+/* ---------------- الإنتاج الدوري للحيوانات ---------------- */
+function produceTick(){
+  if(S.fed){
+    var now = Date.now();
+    var elapsed = now - S.lastProduce;
+    var cycles = Math.floor(elapsed / 60000);
+    if(cycles > 0){
+      Object.keys(S.animals).forEach(function(id){
+        if(S.animals[id] > 0){
+          S.pending[id] = Math.min(20, (S.pending[id] || 0) + S.animals[id] * cycles);
+        }
+      });
+      S.lastProduce = now - (elapsed % 60000);
+      save();
+      if(screen === 'barn') rerender('', lastKey);
+    }
+  }
+}
+
+/* ---------------- البدء ---------------- */
+function boot(){
+  if(S.music) musicStart();
+  render();
+  setInterval(tick, 5000);
+  setInterval(produceTick, 15000);
+  announce('مرحبًا بك في المزرعة السعيدة. لعبة كاملة بالكلام تعمل مع قارئ الشاشة. اضغط بدء يوم جديد للبدء.');
+}
+boot();
+</script>
+</body>
+</html>

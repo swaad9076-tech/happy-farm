@@ -184,7 +184,7 @@ public class MainActivity extends Activity {
     private String engineLabel(String pkg) {
         if (pkg == null || pkg.isEmpty()) return "محرك النظام الافتراضي";
         try {
-            for (TextToSpeech.EngineInfo e : TextToSpeech.getEngines(this)) {
+            for (TextToSpeech.EngineInfo e : TextToSpeech.getEngines()) {
                 if (e.name.equals(pkg)) {
                     String label = e.label == null ? "" : e.label.trim();
                     return label.isEmpty() ? pkg : label;
@@ -245,7 +245,7 @@ public class MainActivity extends Activity {
 
     /** ينطق عبر Gemini: يجلب الملف من الكاش أو يطلبه من الشبكة، ويرجع للمحلي لو فشل. */
     private void cloudSpeak(final String text) {
-        if (!cloudReady() || text.length() > 1500) {
+        if (!cloudEnabled() || cloudKey().isEmpty() || text.length() > 1500) {
             localSpeak(text);
             return;
         }
@@ -435,7 +435,7 @@ public class MainActivity extends Activity {
         public String listEngines() {
             JSONArray arr = new JSONArray();
             try {
-                List<TextToSpeech.EngineInfo> engines = TextToSpeech.getEngines(MainActivity.this);
+                List<TextToSpeech.EngineInfo> engines = TextToSpeech.getEngines();
                 for (TextToSpeech.EngineInfo e : engines) {
                     JSONObject o = new JSONObject();
                     o.put("pkg", e.name);

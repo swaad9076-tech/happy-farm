@@ -71,48 +71,85 @@
    المزرعة السعيدة — لعبة نصية كاملة تعمل مع قارئ الشاشة
    ========================================================== */
 
-/* ---------------- الصوت ---------------- */
-var AC = null;
-function ac(){
-  if(!AC){ try{ AC = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ AC=null; } }
-  if(AC && AC.state === 'suspended'){ try{ AC.resume(); }catch(e){} }
-  return AC;
-}
-function tone(freq, when, dur, type, vol){
-  var c = ac(); if(!c) return;
-  var o = c.createOscillator(), g = c.createGain();
-  o.type = type || 'sine';
-  o.frequency.value = freq;
-  var t0 = c.currentTime + (when || 0);
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(vol || 0.10, t0 + 0.015);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + (dur || 0.15));
-  o.connect(g); g.connect(c.destination);
-  o.start(t0); o.stop(t0 + (dur || 0.15) + 0.05);
-}
-var SFX = {
-  click:function(){ if(!S.sound) return; tone(760,0,0.06,'triangle',0.05); },
-  coin:function(){ if(!S.sound) return; tone(1046,0,0.10,'triangle',0.10); tone(1568,0.09,0.16,'triangle',0.08); },
-  buy:function(){ if(!S.sound) return; [523,659,784].forEach(function(f,i){ tone(f,i*0.07,0.14,'sine',0.09); }); },
-  success:function(){ if(!S.sound) return; [523,659,784,1046].forEach(function(f,i){ tone(f,i*0.08,0.20,'sine',0.09); }); },
-  error:function(){ if(!S.sound) return; tone(230,0,0.14,'sawtooth',0.07); tone(180,0.13,0.22,'sawtooth',0.06); },
-  harvest:function(){ if(!S.sound) return; tone(660,0,0.10,'triangle',0.08); tone(880,0.08,0.16,'triangle',0.07); },
-  water:function(){ if(!S.sound) return; tone(420,0,0.20,'sine',0.06); tone(300,0.14,0.24,'sine',0.05); },
-  wheel:function(){ if(!S.sound) return; for(var i=0;i<9;i++) tone(400+i*70,i*0.06,0.09,'square',0.045); },
-  morning:function(){ if(!S.sound) return; [392,523,659,784].forEach(function(f,i){ tone(f,i*0.12,0.35,'sine',0.08); }); }
+/* ---------------- الصوت ----------------
+   تسجيلات حقيقية لمزرعة (مكتبة Mixkit المجانية، بلا حقوق إلزامية):
+   نقرة، عملات، شرب ماء، حصاد، ديك، بقرة، دجاج، عجلة، وهمهمة المزرعة. */
+var SFX_FILES = {
+  click:'sfx/click.mp3', coin:'sfx/coin.mp3', buy:'sfx/buy.mp3',
+  success:'sfx/success.mp3', error:'sfx/error.mp3', harvest:'sfx/harvest.mp3',
+  water:'sfx/water.mp3', wheel:'sfx/wheel.mp3', morning:'sfx/morning.mp3',
+  feed:'sfx/feed.mp3', collect:'sfx/collect.mp3'
 };
-
-var musicTimer = null, musicStep = 0;
-var MELODY = [523,587,659,784,659,587,523,440,392,440,523,659];
-function musicTick(){
-  if(!S.music) return;
-  var f = MELODY[musicStep % MELODY.length];
-  tone(f,0,0.9,'sine',0.026);
-  tone(f/2,0.02,1.2,'sine',0.016);
-  musicStep++;
+var SFX_VOL = {
+  click:0.45, coin:0.70, buy:0.65, success:0.65, error:0.55,
+  harvest:0.60, water:0.70, wheel:0.55, morning:0.65, feed:0.60, collect:0.65
+};
+var SFX_POOL = {};
+function sfxPlayer(name){
+  if(SFX_POOL[name]) return SFX_POOL[name];
+  var src = SFX_FILES[name]; if(!src) return null;
+  var a = new Audio(src);
+  a.preload = 'auto';
+  a.volume = SFX_VOL[name] || 0.6;
+  SFX_POOL[name] = a;
+  return a;
 }
-function musicStart(){ if(musicTimer) return; musicTimer = setInterval(musicTick,1500); musicTick(); }
-function musicStop(){ if(musicTimer){ clearInterval(musicTimer); musicTimer = null; } }
+function playSfx(name){
+  if(!S.sound) return;
+  var a = sfxPlayer(name); if(!a) return;
+  try{
+    a.currentTime = 0;
+    var p = a.play();
+    if(p && p.catch) p.catch(function(){});
+  }catch(e){}
+}
+var SFX = {};
+Object.keys(SFX_FILES).forEach(function(k){
+  SFX[k] = function(){ playSfx(k); };
+});
+
+/* خلفية المزرعة وهي حية: أصوات دجاج وبهائم وطيور في حلقة هادئة */
+var amb = null, ambTimer = null, ambFade = null, ambWanted = false;
+function ambPlayer(){
+  if(amb) return amb;
+  amb = new Audio('sfx/ambience.mp3');
+  amb.loop = true;
+  amb.preload = 'auto';
+  amb.volume = 0;
+  return amb;
+}
+function musicStart(){
+  ambWanted = true;
+  if(ambFade){ clearInterval(ambFade); ambFade = null; }
+  var a = ambPlayer();
+  try{
+    var p = a.play();
+    if(p && p.catch) p.catch(function(){});
+  }catch(e){ return; }
+  if(ambTimer) return;
+  ambTimer = setInterval(function(){
+    if(!ambWanted){ clearInterval(ambTimer); ambTimer = null; return; }
+    amb.volume = Math.min(0.30, amb.volume + 0.03);
+    if(amb.volume >= 0.30){ clearInterval(ambTimer); ambTimer = null; }
+  }, 120);
+}
+function musicStop(){
+  ambWanted = false;
+  if(ambTimer){ clearInterval(ambTimer); ambTimer = null; }
+  if(!amb || ambFade) return;
+  ambFade = setInterval(function(){
+    amb.volume = Math.max(0, amb.volume - 0.05);
+    if(amb.volume <= 0.001){
+      clearInterval(ambFade); ambFade = null;
+      try{ amb.pause(); amb.currentTime = 0; }catch(e){}
+    }
+  }, 80);
+}
+/* أول لمسة للشاشة تفتح سماح التشغيل التلقائي إن كان مغلقًا */
+document.addEventListener('pointerdown', function unlockAudio(){
+  document.removeEventListener('pointerdown', unlockAudio);
+  if(ambWanted && amb && amb.paused) musicStart();
+}, { once:true });
 
 /* ---------------- النطق ---------------- */
 function speakOut(text){
@@ -753,8 +790,9 @@ SCREENS.settings = function(){
   return title('الإعدادات') +
     '<p class="muted">هذه اللعبة مجانية بالكامل، وتعمل مع قارئ الشاشة دون أي صور تعتمد عليها.</p>' +
     '<button data-act="toggle-sound" data-key="tsound">المؤثرات الصوتية: ' + (S.sound ? 'مفعلة' : 'مغلقة') + '</button>' +
-    '<button data-act="toggle-music" data-key="tmusic">الموسيقى الخلفية: ' + (S.music ? 'مفعلة' : 'مغلقة') + '</button>' +
+    '<button data-act="toggle-music" data-key="tmusic">أصوات المزرعة في الخلفية: ' + (S.music ? 'مفعلة' : 'مغلقة') + '</button>' +
     '<button data-act="toggle-tts" data-key="ttts">النطق الصوتي التلقائي: ' + (S.tts ? 'مفعل' : 'مغلق') + '</button>' +
+    '<p class="muted">المؤثرات الصوتية تسجيلات حقيقية من مكتبة Mixkit المجانية.</p>' +
     '<h3>خيارات أخرى</h3>' +
     '<button data-act="go" data-screen="help" data-key="help2">طريقة اللعب</button>' +
     '<button data-act="reset" data-key="reset">بدء اللعبة من جديد — يمسح كل التقدم</button>' +
@@ -814,7 +852,7 @@ function doFeedAll(){
   S.coins -= cost;
   S.fed = true;
   S.lastProduce = Date.now();
-  SFX.success();
+  SFX.feed();
   rerender('أطعمت كل الحيوانات مقابل ' + fmt(cost) + ' عملة. ستبدأ الإنتاج الآن.', 'f');
 }
 
@@ -828,7 +866,7 @@ function collectAnimal(id){
 function doCollectAll(){
   var total = 0;
   Object.keys(S.pending).forEach(function(id){ total += collectAnimal(id); });
-  if(total){ SFX.coin(); rerender('جمعت ' + total + ' منتجًا من الحيوانات إلى المخزون.', 'c'); }
+  if(total){ SFX.collect(); rerender('جمعت ' + total + ' منتجًا من الحيوانات إلى المخزون.', 'c'); }
   else { SFX.error(); announce('لا توجد منتجات جاهزة. تأكد أن الحيوانات أكلت وانتظر قليلًا.', true); }
 }
 
@@ -1010,7 +1048,7 @@ function doExpandBarn(){
 
 function doBarnCollect(id){
   var n = collectAnimal(id);
-  if(n > 0){ SFX.coin(); rerender('جمعت ' + n + ' منتجًا.', 'bc-'+id); }
+  if(n > 0){ SFX.collect(); rerender('جمعت ' + n + ' منتجًا.', 'bc-'+id); }
   else { SFX.error(); announce('لا توجد منتجات جاهزة لهذا الحيوان.', true); }
 }
 
@@ -1069,7 +1107,7 @@ function doToggle(which){
   }
   save();
   var msg = which === 'sound' ? ('المؤثرات الصوتية ' + (S.sound ? 'مفعلة' : 'مغلقة') + '.')
-          : which === 'music' ? ('الموسيقى الخلفية ' + (S.music ? 'مفعلة' : 'مغلقة') + '.')
+          : which === 'music' ? ('أصوات المزرعة في الخلفية ' + (S.music ? 'مفعلة' : 'مغلقة') + '.')
           : ('النطق التلقائي ' + (S.tts ? 'مفعل' : 'مغلق') + '.');
   rerender(msg, which === 'sound' ? 'tsound' : which === 'music' ? 'tmusic' : 'ttts');
 }

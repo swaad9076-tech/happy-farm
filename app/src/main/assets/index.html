@@ -128,7 +128,7 @@ function speakOut(text){
   }catch(e){}
 }
 var toastTimer = null;
-function toast(text){
+function showToast(text){
   var t = document.getElementById('toast');
   t.textContent = text; t.classList.add('show');
   clearTimeout(toastTimer);
@@ -139,7 +139,7 @@ function announce(text, assertive){
   box.textContent = '';
   setTimeout(function(){ box.textContent = text; }, 60);
   speakOut(text);
-  toast(text);
+  showToast(text);
 }
 
 /* ---------------- البيانات ---------------- */
@@ -189,6 +189,7 @@ var ANIMALS = [
   ['elephant','الفيل',200,'منتج الفيل'],
   ['panda','الباندا',210,'منتج الباندا'],
   ['tiger','النمر',280,'منتج النمر'],
+  ['cheetah','الفهد',280,'منتج الفهد'],
   ['lion','الأسد',300,'منتج الأسد'],
   ['lioness','اللبؤة',300,'منتج اللبؤة']
 ];
@@ -330,6 +331,11 @@ var QUIZ = [
 var KEY = 'waad.happyfarm.v1';
 var S = null;
 
+/* هل قارئ الشاشة يعمل على الهاتف؟ حينها نترك الكلام له حتى لا يتكلم صوتان معًا */
+function srPresent(){
+  try{ return !!(window.Native && Native.hasScreenReader && Native.hasScreenReader()); }catch(e){ return false; }
+}
+
 function fresh(){
   var plots = [];
   for(var i=0;i<6;i++) plots.push({crop:null, readyAt:0, watered:false});
@@ -350,7 +356,7 @@ function fresh(){
     quizLeft: 3,
     sound: true,
     music: false,
-    tts: true,
+    tts: !srPresent(),
     lastProduce: Date.now()
   };
 }
@@ -412,7 +418,7 @@ function tick(){
 }
 
 /* ---------------- الواجهة ---------------- */
-var screen = 'home';
+var view = 'home';
 var lastKey = '';
 var screenEl = document.getElementById('screen');
 
@@ -425,7 +431,7 @@ function updateHeader(){
 }
 
 function render(){
-  var fn = SCREENS[screen] || SCREENS.home;
+  var fn = SCREENS[view] || SCREENS.home;
   screenEl.innerHTML = fn();
   updateHeader();
   var h = screenEl.querySelector('h2');
@@ -434,7 +440,7 @@ function render(){
 
 function rerender(msg, key){
   var k = key || lastKey;
-  var fn = SCREENS[screen] || SCREENS.home;
+  var fn = SCREENS[view] || SCREENS.home;
   screenEl.innerHTML = fn();
   updateHeader();
   if(k){
@@ -446,7 +452,7 @@ function rerender(msg, key){
 }
 
 function go(name){
-  screen = name;
+  view = name;
   render();
   window.scrollTo(0,0);
 }
@@ -1045,7 +1051,7 @@ function doCreateShop(){
   S.shops.push({name:name, cat:cat});
   SFX.success();
   save();
-  screen = 'shops';
+  view = 'shops';
   render();
   announce('تم إنشاء محل ' + name + ' في قسم ' + cat + '. سيعطيك مئتي عملة كل يوم جديد.');
 }
@@ -1079,7 +1085,7 @@ function doReset(){
   resetArmed = false;
   S = fresh();
   save();
-  screen = 'home';
+  view = 'home';
   render();
   SFX.morning();
   announce('بدأت اللعبة من جديد. رصيدك ألف وخمسمئة عملة.');
@@ -1150,7 +1156,7 @@ function produceTick(){
       });
       S.lastProduce = now - (elapsed % 60000);
       save();
-      if(screen === 'barn') rerender('', lastKey);
+      if(view === 'barn') rerender('', lastKey);
     }
   }
 }

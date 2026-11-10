@@ -1,6 +1,7 @@
 package com.waad.happyfarm;
 
 import android.os.Bundle;
+import android.view.accessibility.AccessibilityManager;
 import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
 import android.view.KeyEvent;
@@ -18,10 +19,14 @@ public class MainActivity extends Activity {
     private WebView web;
     private TextToSpeech tts;
     private boolean ttsReady = false;
+    private boolean screenReader = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        AccessibilityManager am = (AccessibilityManager) getSystemService(ACCESSIBILITY_SERVICE);
+        screenReader = am != null && am.isEnabled() && am.isTouchExplorationEnabled();
 
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
@@ -54,6 +59,11 @@ public class MainActivity extends Activity {
     }
 
     private class Bridge {
+        @JavascriptInterface
+        public boolean hasScreenReader() {
+            return screenReader;
+        }
+
         @JavascriptInterface
         public void speak(String text) {
             if (!ttsReady || text == null) return;

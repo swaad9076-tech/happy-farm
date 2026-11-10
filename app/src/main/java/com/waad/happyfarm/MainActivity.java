@@ -183,8 +183,9 @@ public class MainActivity extends Activity {
     /** اسم المحرك المقروء من قائمة المحركات المتسطبة. */
     private String engineLabel(String pkg) {
         if (pkg == null || pkg.isEmpty()) return "محرك النظام الافتراضي";
+        if (tts == null) return pkg;
         try {
-            for (TextToSpeech.EngineInfo e : TextToSpeech.getEngines()) {
+            for (TextToSpeech.EngineInfo e : tts.getEngines()) {
                 if (e.name.equals(pkg)) {
                     String label = e.label == null ? "" : e.label.trim();
                     return label.isEmpty() ? pkg : label;
@@ -435,7 +436,8 @@ public class MainActivity extends Activity {
         public String listEngines() {
             JSONArray arr = new JSONArray();
             try {
-                List<TextToSpeech.EngineInfo> engines = TextToSpeech.getEngines();
+                if (tts == null) return arr.toString();
+                List<TextToSpeech.EngineInfo> engines = tts.getEngines();
                 for (TextToSpeech.EngineInfo e : engines) {
                     JSONObject o = new JSONObject();
                     o.put("pkg", e.name);

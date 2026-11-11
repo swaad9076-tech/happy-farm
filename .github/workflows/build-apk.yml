@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Embed Gemini voice key
+        run: printf '%s' "${{ secrets.GEMINI_KEY }}" > app/src/main/assets/gemini_key.txt
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

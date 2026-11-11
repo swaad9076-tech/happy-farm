@@ -200,9 +200,34 @@ public class MainActivity extends Activity {
 
     private void localSpeak(String text) {
         if (!ttsReady || text == null) return;
+        String t = text.trim();
+        if (t.isEmpty()) return;
+        // Android يرفض النص الطويل في صمت (حد أقصى ~4000 حرف)؛ نقسمه على الجمل.
+        final int MAX = 700;
         try {
             tts.stop();
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "farm");
+            int start = 0;
+            boolean first = true;
+            while (start < t.length()) {
+                int end = Math.min(t.length(), start + MAX);
+                if (end < t.length()) {
+                    int cut = start + 200;
+                    for (int i = end; i > start + 200; i--) {
+                        char c = t.charAt(i - 1);
+                        if (c == '.' || c == '،' || c == '؟' || c == '!' || c == '\n' || c == '؛') {
+                            cut = i;
+                            break;
+                        }
+                    }
+                    end = cut;
+                }
+                String part = t.substring(start, end).trim();
+                if (!part.isEmpty()) {
+                    tts.speak(part, first ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD, null, "farm" + start);
+                }
+                first = false;
+                start = end;
+            }
         } catch (Exception ignored) {
         }
     }
@@ -215,10 +240,31 @@ public class MainActivity extends Activity {
 
     private String cloudKey() {
         String k = prefs().getString(KEY_CLOUD_KEY, "");
+        if (k == null || k.trim().isEmpty()) k = builtinKey();
         return k == null ? "" : k.trim();
     }
 
+    /** مفتاح جيميناي المدموج داخل التطبيق وقت البناء. فارغ لو البناء بدون مفتاح. */
+    private String builtinKey;
+    private boolean builtinLoaded;
+
+    private String builtinKey() {
+        if (builtinLoaded) return builtinKey;
+        builtinLoaded = true;
+        try (InputStream in = getAssets().open("gemini_key.txt")) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            builtinKey = new String(out.toByteArray(), StandardCharsets.UTF_8).trim();
+        } catch (Exception e) {
+            builtinKey = "";
+        }
+        return builtinKey;
+    }
+
     private boolean cloudEnabled() {
+        if (!prefs().contains(KEY_CLOUD_ON)) return !builtinKey().isEmpty();
         return prefs().getBoolean(KEY_CLOUD_ON, false);
     }
 
@@ -487,7 +533,10 @@ public class MainActivity extends Activity {
                 String k = cloudKey();
                 o.put("enabled", cloudEnabled());
                 o.put("hasKey", !k.isEmpty());
-                o.put("keyHint", k.isEmpty() ? "" : ("…" + k.substring(Math.max(0, k.length() - 4))));
+                o.put("builtin", !builtinKey().isEmpty());
+                String userKey = prefs().getString(KEY_CLOUD_KEY, "");
+                o.put("keyHint", userKey == null || userKey.isEmpty() ? ""
+                        : ("…" + userKey.substring(Math.max(0, userKey.length() - 4))));
                 o.put("voice", cloudVoice());
                 o.put("error", lastCloudError);
             } catch (Exception ignored) {

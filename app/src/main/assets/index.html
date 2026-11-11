@@ -226,7 +226,7 @@ function voiceLabel(){
     if(window.Native && Native.voiceInfo){
       var o = JSON.parse(Native.voiceInfo() || '{}');
       if(o && o.locale){
-        return (o.network ? 'صوت شبكة يحتاج إنترنت: ' : 'صوت محلي: ') + o.locale;
+        return (o.network ? 'صوت شبكة يحتاج إنترنت.' : 'صوت محلي يعمل بدون إنترنت.');
       }
     }
   }catch(e){}
@@ -241,7 +241,7 @@ function loadVoices(){
         var v = raw[i];
         VOICES.push({
           name: v.name,
-          label: (v.network ? 'شبكة' : 'محلي') + ' — ' + v.locale + ' — ' + v.name
+          label: 'صوت عربي ' + (VOICES.length + 1) + (v.network ? ' — يحتاج إنترنت' : ' — يعمل بدون إنترنت')
         });
       }
     }
@@ -267,7 +267,8 @@ function currentEngineLabel(){
   try{
     if(window.Native && Native.voiceInfo){
       var o = JSON.parse(Native.voiceInfo() || '{}');
-      if(o && o.engineLabel) return o.engineLabel;
+      if(o && o.engineLabel && /[؀-ۿ]/.test(o.engineLabel)) return o.engineLabel;
+      if(o && o.engineLabel) return 'محرك النطق المختار';
     }
   }catch(e){}
   return 'محرك النظام الافتراضي';
@@ -280,9 +281,10 @@ function loadEngines(){
       for(var i = 0; i < raw.length; i++){
         var e = raw[i] || {};
         if(!e.pkg) continue;
+        var lab = e.label || '';
         ENGINES.push({
           pkg: e.pkg,
-          label: e.label || e.pkg,
+          label: /[؀-ۿ]/.test(lab) ? lab : ('محرك نطق رقم ' + (ENGINES.length + 1)),
           current: !!e.current
         });
       }
@@ -772,6 +774,14 @@ SCREENS['shop-supplies'] = function(){
   return html;
 };
 
+function plotLine(p, i, now){
+  var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
+  var ready = now >= p.readyAt;
+  return 'القطعة رقم ' + (i+1) + ': ' + (sd ? sd[5] : 'محصول') +
+    (ready ? ' — جاهزة للحصاد' : ' — تنمو، يتبقى ' + humanMs(p.readyAt-now)) +
+    (p.watered ? '، مروية' : '، عطشانة');
+}
+
 SCREENS.land = function(){
   var now = Date.now();
   var html = title('الأرض والزراعة') +
@@ -784,12 +794,7 @@ SCREENS.land = function(){
       html += '<button data-act="plot-empty" data-i="' + i + '" data-key="plot-' + i + '">' +
         'القطعة رقم ' + (i+1) + ': فارغة. ازرع فيها من قسم البذور بالأسفل</button>';
     }else{
-      var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
-      var ready = now >= p.readyAt;
-      var label = 'القطعة رقم ' + (i+1) + ': ' + (sd ? sd[5] : 'محصول') +
-        (ready ? ' — جاهزة للحصاد' : ' — تنمو، يتبقى ' + humanMs(p.readyAt-now)) +
-        (p.watered ? '، مروية' : '، عطشانة');
-      html += '<div class="card"><p class="big">' + label + '</p><div class="row">' +
+      html += '<div class="card"><p class="big" data-tick="plot-' + i + '">' + plotLine(p, i, now) + '</p><div class="row">' +
         '<button data-act="plot-water" data-i="' + i + '" data-key="pw-' + i + '">ري</button>' +
         '<button data-act="plot-harvest" data-i="' + i + '" data-key="ph-' + i + '">حصاد</button>' +
         '</div></div>';
@@ -814,15 +819,22 @@ SCREENS.land = function(){
   return html;
 };
 
+function gardenLine(kind, now){
+  if(kind === 'garden'){
+    return 'الحديقة: ' + (now >= S.garden.readyAt ? 'المحصول جاهز وتم جمعه'
+      : 'المحصول القادم بعد ' + humanMs(S.garden.readyAt - now));
+  }
+  return 'البستان: ' + (now >= S.orchard.readyAt ? 'الثمرة جاهزة وتم جمعها'
+    : 'الثمرة القادمة بعد ' + humanMs(S.orchard.readyAt - now));
+}
+
 SCREENS.garden = function(){
   var now = Date.now();
   return title('الحديقة والبستان') +
     '<p class="muted">الحديقة والبستان يعملان وحدهما: كل فترة ينتجان محصولًا جديدًا ويضعانه في مخزونك تلقائيًا.</p>' +
-    '<div class="card"><p class="big">الحديقة: ' +
-      (now >= S.garden.readyAt ? 'المحصول جاهز وتم جمعه' : 'المحصول القادم بعد ' + humanMs(S.garden.readyAt-now)) +
+    '<div class="card"><p class="big" data-tick="garden">' + gardenLine('garden', now) +
     '</p><p class="muted">تنتج الزهور كل ثلاث دقائق، حبتين في كل مرة.</p></div>' +
-    '<div class="card"><p class="big">البستان: ' +
-      (now >= S.orchard.readyAt ? 'الثمرة جاهزة وتم جمعها' : 'الثمرة القادمة بعد ' + humanMs(S.orchard.readyAt-now)) +
+    '<div class="card"><p class="big" data-tick="orchard">' + gardenLine('orchard', now) +
     '</p><p class="muted">ينتج الفواكه كل أربع دقائق، حبتين في كل مرة.</p></div>' +
     '<p>محاصيلك من الزهور والفواكه تجدها في السوق للبيع.</p>' +
     backBtn();
@@ -976,23 +988,27 @@ SCREENS.settings = function(){
     '<button data-act="toggle-sound" data-key="tsound">المؤثرات الصوتية: ' + (S.sound ? 'مفعلة' : 'مغلقة') + '</button>' +
     '<button data-act="toggle-music" data-key="tmusic">أصوات المزرعة في الخلفية: ' + (S.music ? 'مفعلة' : 'مغلقة') + '</button>' +
     '<button data-act="toggle-tts" data-key="ttts">النطق الصوتي التلقائي: ' + (S.tts ? 'مفعل' : 'مغلق') + '</button>' +
-    '<p class="muted">المؤثرات الصوتية تسجيلات حقيقية من مكتبة Mixkit المجانية.</p>' +
+    '<p class="muted">المؤثرات الصوتية تسجيلات حقيقية مسموح بها للاستخدام المجاني.</p>' +
     '<h3>صوت النطق</h3>' +
     '<p class="muted">محرك النطق الحالي: ' + currentEngineLabel() + '</p>' +
     '<p class="muted">الصوت الحالي: ' + voiceLabel() + '</p>' +
-    '<button data-act="list-engines" data-key="listen">اختيار محرك النطق، مثل MultiTTS أو جوجل</button>' +
+    '<button data-act="list-engines" data-key="listen">اختيار محرك النطق الموجود على هاتفك</button>' +
     '<button data-act="test-voice" data-key="testv">جرّب الصوت الحالي</button>' +
     '<button data-act="list-voices" data-key="listv">اختيار صوت عربي آخر داخل المحرك</button>' +
     '<h3>الصوت السحابي</h3>' +
     '<p class="muted">صوت أنقى يشتغل على الإنترنت. الصوت الحالي: ' + cloudLabel() + '</p>' +
-    (cloudInfo().hasKey ? '' :
-      '<p class="muted">الصق مفتاح جيميناي في الخانة دي:</p>' +
-      '<input id="cloud-key" type="text" autocomplete="off" aria-label="مفتاح جيميناي" ' +
-      'placeholder="AIza..." class="muted" />') +
-    '<button data-act="save-cloud" data-key="savecloud">حفظ مفتاح جيميناي وتشغيل الصوت السحابي</button>' +
+    (cloudInfo().builtin ? '' :
+      (cloudInfo().hasKey ? '' :
+        '<p class="muted">الصق مفتاح جيميناي في الخانة دي:</p>' +
+        '<input id="cloud-key" type="text" autocomplete="off" aria-label="مفتاح جيميناي" ' +
+        'placeholder="اكتب المفتاح هنا" class="muted" />')) +
+    (cloudInfo().builtin ? '' :
+      '<button data-act="save-cloud" data-key="savecloud">حفظ مفتاح جيميناي وتشغيل الصوت السحابي</button>') +
     '<button data-act="test-cloud" data-key="testcloud">جرّب الصوت السحابي</button>' +
     '<button data-act="list-cloud-voices" data-key="listcloud">اختيار صوت سحابي آخر</button>' +
-    (cloudInfo().hasKey ? '<button data-act="clear-cloud" data-key="clearcloud">مسح المفتاح والرجوع لصوت الهاتف</button>' : '') +
+    (cloudInfo().builtin ?
+      '<button data-act="toggle-cloud" data-key="tcloud">تشغيل أو إيقاف الصوت السحابي: ' + (cloudInfo().enabled ? 'مفعل' : 'مغلق') + '</button>' :
+      (cloudInfo().hasKey ? '<button data-act="clear-cloud" data-key="clearcloud">مسح المفتاح والرجوع لصوت الهاتف</button>' : '')) +
     '<h3>خيارات أخرى</h3>' +
     '<button data-act="go" data-screen="help" data-key="help2">طريقة اللعب</button>' +
     '<button data-act="reset" data-key="reset">بدء اللعبة من جديد — يمسح كل التقدم</button>' +
@@ -1015,9 +1031,9 @@ SCREENS.voices = function(){
 
 SCREENS.engines = function(){
   var html = title('اختيار محرك النطق') +
-    '<p class="muted">دي محركات النطق المتسطبة على هاتفك. اختاري المحرك اللي فيه صوت سلمى، زي MultiTTS، والتطبيق هيقرا بيه. المحرك الحالي: ' + currentEngineLabel() + '.</p>';
+    '<p class="muted">دي محركات النطق المتسطبة على هاتفك. اختاري المحرك اللي فيه صوت سلمى والتطبيق هيقرا بيه. المحرك الحالي: ' + currentEngineLabel() + '.</p>';
   if(!ENGINES.length){
-    html += '<p>لم تظهر محركات إضافية. لو MultiTTS متسطب، افتحه مرة وشغّل صوت عربي فيه، وبعدين ارجع هنا.</p>';
+    html += '<p>لم تظهر محركات إضافية. لو عندك محرك تاني فيه صوت عربي، افتحه مرة وشغّل الصوت العربي فيه، وبعدين ارجع هنا.</p>';
   }
   ENGINES.forEach(function(e, i){
     html += '<button data-act="pick-engine" data-i="' + i + '" data-key="e' + i + '">' +
@@ -1051,7 +1067,7 @@ SCREENS.help = function(){
     '<h3>المال</h3>' +
     '<p>تبيع المحاصيل والمنتجات في السوق، وتصنع الملابس والمراتب والعقود في المصنع، وتطبخ في المطعم، وتنشئ محلات تعطيك دخلًا يوميًا. عجلة الحظ والأسئلة تعطيك مكافآت كبيرة مرة كل يوم.</p>' +
     '<h3>الصوت</h3>' +
-    '<p>التطبيق يقرأ كل زر وكل نتيجة بصوت الهاتف. ولو عندك محرك نطق تاني فيه صوت سلمى، زي MultiTTS، افتح الإعدادات ثم اختيار محرك النطق واختاري المحرك. وفيه كمان صوت سحابي من جيميناي يحتاج إنترنت ومفتاح، ولو النت قطع التطبيق يرجع لصوت الهاتف تلقائيًا.</p>' +
+    '<p>التطبيق يقرأ كل زر وكل نتيجة بصوت الهاتف. ولو عندك محرك نطق تاني فيه صوت سلمى، افتح الإعدادات ثم اختيار محرك النطق واختاري المحرك. وفيه كمان صوت سحابي من جيميناي يحتاج إنترنت ومفتاح، ولو النت قطع التطبيق يرجع لصوت الهاتف تلقائيًا.</p>' +
     backBtn();
 };
 
@@ -1077,7 +1093,7 @@ function doHarvestAll(){
     if(p.crop && Date.now() >= p.readyAt){
       var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
       if(sd){ addItem('crop:'+sd[0], sd[4]); total += sd[4]; }
-      p.crop = null; p.readyAt = 0; p.watered = false;
+      p.crop = null; p.readyAt = 0; p.watered = false; p.told = false;
       n++;
     }
   });
@@ -1187,6 +1203,7 @@ function doPlant(id, all){
     p.crop = id;
     p.readyAt = Date.now() + sd[3]*1000;
     p.watered = false;
+    p.told = false;
     planted++;
   }
   SFX.harvest();
@@ -1210,7 +1227,7 @@ function doPlotHarvest(i){
   var sd = SEEDS.filter(function(s){ return s[0] === p.crop; })[0];
   var qty = sd ? sd[4] : 1;
   addItem('crop:'+p.crop, qty);
-  p.crop = null; p.readyAt = 0; p.watered = false;
+  p.crop = null; p.readyAt = 0; p.watered = false; p.told = false;
   SFX.harvest();
   rerender('حصت القطعة رقم ' + (i+1) + ' وأضفت ' + qty + ' ' + (sd ? sd[5] : 'وحدة') + ' إلى المخزون.', 'ph-'+i);
 }
@@ -1415,6 +1432,11 @@ function handle(act, d){
     case 'save-cloud': doSaveCloud(); return;
     case 'test-cloud': doTestCloud(); return;
     case 'clear-cloud': doClearCloud(); return;
+    case 'toggle-cloud':
+      var nowOn = !cloudInfo().enabled;
+      try{ if(window.Native && Native.setCloudEnabled) Native.setCloudEnabled(nowOn); }catch(e){}
+      rerender(nowOn ? 'الصوت السحابي مفعل.' : 'الصوت السحابي مغلق. جارٍ استخدام صوت الهاتف.', 'tcloud');
+      return;
     case 'list-engines': loadEngines(); go('engines'); return;
     case 'pick-engine': doPickEngine(parseInt(d.i, 10)); return;
     case 'list-cloud-voices': go('cloudVoices'); return;
@@ -1451,11 +1473,35 @@ function produceTick(){
   }
 }
 
+/* ---------------- تحديث العدادات كل ثانية ---------------- */
+function tickTexts(){
+  var now = Date.now();
+  var els = screenEl.querySelectorAll('[data-tick]');
+  for(var i = 0; i < els.length; i++){
+    var k = els[i].getAttribute('data-tick');
+    if(k === 'garden' || k === 'orchard'){
+      els[i].textContent = gardenLine(k, now);
+    }else if(k.indexOf('plot-') === 0){
+      var idx = parseInt(k.slice(5), 10);
+      var p = S.plots[idx];
+      if(!p || !p.crop) continue;
+      els[i].textContent = plotLine(p, idx, now);
+      if(now >= p.readyAt && !p.told){
+        p.told = true;
+        save();
+        announce('القطعة رقم ' + (idx+1) + ' جاهزة للحصاد.', true);
+      }
+      if(now < p.readyAt && p.told) p.told = false;
+    }
+  }
+}
+
 /* ---------------- البدء ---------------- */
 function boot(){
   if(S.music) musicStart();
   render();
   setInterval(tick, 5000);
+  setInterval(tickTexts, 1000);
   setInterval(produceTick, 15000);
   announce('مرحبًا بك في المزرعة السعيدة. لعبة كاملة بالكلام تعمل مع قارئ الشاشة. اضغط بدء يوم جديد للبدء.');
 }

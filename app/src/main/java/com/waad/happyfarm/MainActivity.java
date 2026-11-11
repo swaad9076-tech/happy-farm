@@ -49,9 +49,18 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOUD_VOICE = "cloud_voice";
     private static final String KEY_CLOUD_MANUAL = "cloud_off_manual";
     private static final String KEY_QUOTA_DAY = "quota_day";
-    private static final String GEMINI_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            + "gemini-2.5-flash-preview-tts:generateContent?key=";
+    /*
+     * موديلات الصوت بالترتيب: الأحدث الأول. كل موديل عنده حصة يومية مستقلة،
+     * فلو واحد خلصت حصته بنجرّب اللي بعده بدل ما نرجع لصوت الهاتف على طول.
+     */
+    private static final String[] CLOUD_MODELS = {
+            "gemini-3.8-flash-tts",
+            "gemini-3.1-flash-tts-preview",
+            "gemini-3.8-flash-lite-tts",
+            "gemini-2.5-flash-preview-tts"
+    };
+    private static final String GEMINI_BASE =
+            "https://generativelanguage.googleapis.com/v1beta/models/";
 
     private WebView web;
     private TextToSpeech tts;
@@ -302,12 +311,34 @@ public class MainActivity extends Activity {
     }
 
     /** ينطق عبر Gemini: يجلب الملف من الكاش أو يطلبه من الشبكة، ويرجع للمحلي لو فشل. */
-    /** حصة جيميناي المجانية تنتهي، وبعدها ما نضيّعش وقت في طلبات هتترفض. */
-    private boolean quotaBlockedToday() {
-        String d = prefs().getString(KEY_QUOTA_DAY, "");
-        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private static String todayKey() {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
                 .format(new java.util.Date());
-        return today.equals(d);
+    }
+
+    /** حصة موديل معيّن خلصت النهارده؟ بنتحقق لكل موديل على حدة. */
+    private boolean modelBlockedToday(String model) {
+        return todayKey().equals(prefs().getString(KEY_QUOTA_DAY + "_" + model, ""));
+    }
+
+    private void blockModelToday(String model) {
+        prefs().edit().putString(KEY_QUOTA_DAY + "_" + model, todayKey()).apply();
+    }
+
+    /** يمسح علامات الحصة كلها — بعد ما المفتاح يتغيّر أو الصوت السحابي يتفتح من جديد. */
+    private void clearQuotaMarks() {
+        android.content.SharedPreferences.Editor ed = prefs().edit();
+        ed.remove(KEY_QUOTA_DAY);
+        for (String m : CLOUD_MODELS) ed.remove(KEY_QUOTA_DAY + "_" + m);
+        ed.apply();
+    }
+
+    /** كل موديلات الصوت خلصت حصتها النهارده، فمفيش فايدة من أي طلب جديد. */
+    private boolean quotaBlockedToday() {
+        for (String m : CLOUD_MODELS) {
+            if (!modelBlockedToday(m)) return false;
+        }
+        return true;
     }
 
     private void cloudSpeak(final String text) {
@@ -333,11 +364,6 @@ public class MainActivity extends Activity {
                 pruneCache();
             } catch (Exception e) {
                 lastCloudError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                if (lastCloudError.contains("HTTP 429")) {
-                    String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                            .format(new java.util.Date());
-                    prefs().edit().putString(KEY_QUOTA_DAY, today).apply();
-                }
                 runOnUiThread(() -> {
                     if (seq != speakSeq) return;
                     localSpeak(warnPrefix() + text);
@@ -353,7 +379,7 @@ public class MainActivity extends Activity {
             return "المفتاح مرفوض أو انتهت صلاحيته";
         }
         if (e.contains("http 429")) {
-            return "حصة مفتاح جيميناي المجانية خلصت، وهي عشرة طلبات بس في اليوم";
+            return "حصص موديلات الصوت المجانية خلصت للنهارده، وكل موديل له عدد طلبات صغير في اليوم";
         }
         if (e.contains("http 404")) return "خدمة الصوت مش متاحة للمفتاح ده";
         if (e.contains("unknownhost") || e.contains("timeout") || e.contains("connect")) {
@@ -371,7 +397,26 @@ public class MainActivity extends Activity {
                 + ". هقرأ بصوت الهاتف دلوقتي. تقدر تعرف التفاصيل من الإعدادات، حالة الصوت السحابي. ";
     }
 
+    /** يجرب الموديلات بالترتيب: موديل خلصت حصته اليومية ما يوقفش الصوت كله. */
     private byte[] synth(String text, String voice) throws Exception {
+        Exception last = null;
+        for (String model : CLOUD_MODELS) {
+            if (modelBlockedToday(model)) continue;
+            try {
+                return synthOnce(model, text, voice);
+            } catch (Exception e) {
+                String m = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+                if (!m.contains("http 429")) throw e;
+                last = e;
+                // الحصة اليومية بتقفل الموديل لبكرة. حصة الدقيقة بتعدي، فبنجرب اللي بعده بس.
+                if (m.contains("per day") || m.contains("per_day")) blockModelToday(model);
+            }
+        }
+        if (last != null) throw last;
+        throw new Exception("HTTP 429: كل موديلات الصوت خلصت حصتها النهارده");
+    }
+
+    private byte[] synthOnce(String model, String text, String voice) throws Exception {
         JSONObject body = new JSONObject();
         JSONObject textPart = new JSONObject().put("text", text);
         JSONObject content = new JSONObject()
@@ -385,7 +430,8 @@ public class MainActivity extends Activity {
                 .put("responseModalities", new JSONArray().put("AUDIO"))
                 .put("speechConfig", speechCfg));
 
-        HttpURLConnection c = (HttpURLConnection) new URL(GEMINI_URL + cloudKey()).openConnection();
+        HttpURLConnection c = (HttpURLConnection) new URL(
+                GEMINI_BASE + model + ":generateContent?key=" + cloudKey()).openConnection();
         c.setRequestMethod("POST");
         c.setConnectTimeout(15000);
         c.setReadTimeout(60000);
@@ -412,8 +458,13 @@ public class MainActivity extends Activity {
             if (p.has("inlineData")) { inline = p.getJSONObject("inlineData"); break; }
         }
         if (inline == null) throw new Exception("الرد لا يحتوي صوتًا");
-        byte[] pcm = Base64.decode(inline.getString("data"), Base64.DEFAULT);
-        return pcmToWav(pcm, 24000, 1, 16);
+        byte[] data = Base64.decode(inline.getString("data"), Base64.DEFAULT);
+        // الموديلات الجديدة بترجع WAV جاهز، والقديمة بترجع PCM خام محتاج رأس WAV.
+        if (data.length > 12 && data[0] == 'R' && data[1] == 'I'
+                && data[2] == 'F' && data[3] == 'F') {
+            return data;
+        }
+        return pcmToWav(data, 24000, 1, 16);
     }
 
     private static String readAll(InputStream in) throws Exception {
@@ -653,6 +704,9 @@ public class MainActivity extends Activity {
                 o.put("voice", cloudVoice());
                 o.put("error", lastCloudError);
                 o.put("errorAr", lastCloudError.isEmpty() ? "" : cloudReasonAr(lastCloudError));
+                int freeModels = 0;
+                for (String m : CLOUD_MODELS) if (!modelBlockedToday(m)) freeModels++;
+                o.put("modelsFree", freeModels);
                 String st;
                 if (!o.getBoolean("hasKey")) {
                     st = "الصوت السحابي مش مفعّل: مفيش مفتاح جوه التطبيق.";
@@ -661,9 +715,11 @@ public class MainActivity extends Activity {
                 } else {
                     st = "الصوت السحابي مفعّل، والمفتاح "
                             + (o.getBoolean("builtin") ? "مدموج جوه التطبيق" : "محفوظ")
-                            + "، والصوت المختار " + cloudVoice() + ".";
+                            + "، والصوت المختار " + cloudVoice() + "، وفاضل "
+                            + freeModels + " من " + CLOUD_MODELS.length
+                            + " موديلات صوت عندهم حصة النهارده.";
                     if (quotaBlockedToday()) {
-                        st += " لكن حصة اليوم خلصت، فالتطبيق بيقرأ بصوت الهاتف لحد بكرة.";
+                        st += " حصص الموديلات كلها خلصت، فالتطبيق بيقرأ بصوت الهاتف لحد بكرة.";
                     } else if (!lastCloudError.isEmpty()) {
                         st += " لكن آخر محاولة فشلت: " + cloudReasonAr(lastCloudError) + ".";
                     } else {
@@ -682,7 +738,8 @@ public class MainActivity extends Activity {
             prefs().edit().putString(KEY_CLOUD_KEY, k)
                     .putBoolean(KEY_CLOUD_ON, !k.isEmpty())
                     .putBoolean(KEY_CLOUD_MANUAL, k.isEmpty())
-                    .remove(KEY_QUOTA_DAY).apply();
+                    .apply();
+            clearQuotaMarks();
             lastCloudError = "";
             cloudWarned = false;
             return !k.isEmpty();
@@ -699,8 +756,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void setCloudEnabled(boolean on) {
             prefs().edit().putBoolean(KEY_CLOUD_ON, on)
-                    .putBoolean(KEY_CLOUD_MANUAL, true)
-                    .remove(KEY_QUOTA_DAY).apply();
+                    .putBoolean(KEY_CLOUD_MANUAL, true).apply();
+            clearQuotaMarks();
             lastCloudError = "";
             cloudWarned = false;
             if (!on) stopSpeaking();

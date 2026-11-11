@@ -326,7 +326,8 @@ function cloudLabel(){
   if(!o.hasKey) return 'مغلق، لم يُحفظ مفتاح بعد.';
   var state = o.enabled ? 'مفعّل' : 'المفتاح محفوظ لكن الصوت السحابي مغلق';
   return state + ' — صوت ' + cloudNameAr(o.voice) +
-    (o.keyHint ? ' — المفتاح ينتهي بـ ' + o.keyHint : '');
+    (o.keyHint ? ' — المفتاح ينتهي بـ ' + o.keyHint : '') +
+    (o.errorAr ? ' — آخر مشكلة: ' + o.errorAr : '');
 }
 function doSaveCloud(){
   var el = document.getElementById('cloud-key');
@@ -993,6 +994,7 @@ SCREENS.settings = function(){
     '<p class="muted">محرك النطق الحالي: ' + currentEngineLabel() + '</p>' +
     '<p class="muted">الصوت الحالي: ' + voiceLabel() + '</p>' +
     '<button data-act="list-engines" data-key="listen">اختيار محرك النطق الموجود على هاتفك</button>' +
+    '<button data-act="open-tts-settings" data-key="opentts">فتح إعدادات النطق في أندرويد</button>' +
     '<button data-act="test-voice" data-key="testv">جرّب الصوت الحالي</button>' +
     '<button data-act="list-voices" data-key="listv">اختيار صوت عربي آخر داخل المحرك</button>' +
     '<h3>الصوت السحابي</h3>' +
@@ -1006,6 +1008,7 @@ SCREENS.settings = function(){
       '<button data-act="save-cloud" data-key="savecloud">حفظ مفتاح جيميناي وتشغيل الصوت السحابي</button>') +
     '<button data-act="test-cloud" data-key="testcloud">جرّب الصوت السحابي</button>' +
     '<button data-act="list-cloud-voices" data-key="listcloud">اختيار صوت سحابي آخر</button>' +
+    '<button data-act="cloud-status" data-key="cstatus">حالة الصوت السحابي</button>' +
     (cloudInfo().builtin ?
       '<button data-act="toggle-cloud" data-key="tcloud">تشغيل أو إيقاف الصوت السحابي: ' + (cloudInfo().enabled ? 'مفعل' : 'مغلق') + '</button>' :
       (cloudInfo().hasKey ? '<button data-act="clear-cloud" data-key="clearcloud">مسح المفتاح والرجوع لصوت الهاتف</button>' : '')) +
@@ -1013,6 +1016,7 @@ SCREENS.settings = function(){
     '<button data-act="go" data-screen="help" data-key="help2">طريقة اللعب</button>' +
     '<button data-act="reset" data-key="reset">بدء اللعبة من جديد — يمسح كل التقدم</button>' +
     '<button data-act="exit" data-key="exit">الخروج من اللعبة</button>' +
+    (appVersionText() ? '<p class="muted">إصدار التطبيق: ' + appVersionText() + '</p>' : '') +
     backBtn();
 };
 
@@ -1033,7 +1037,8 @@ SCREENS.engines = function(){
   var html = title('اختيار محرك النطق') +
     '<p class="muted">دي محركات النطق المتسطبة على هاتفك. اختاري المحرك اللي فيه صوت سلمى والتطبيق هيقرا بيه. المحرك الحالي: ' + currentEngineLabel() + '.</p>';
   if(!ENGINES.length){
-    html += '<p>لم تظهر محركات إضافية. لو عندك محرك تاني فيه صوت عربي، افتحه مرة وشغّل الصوت العربي فيه، وبعدين ارجع هنا.</p>';
+    html += '<p>لم تظهر محركات إضافية. لو عندك محرك تاني فيه صوت عربي، افتحه مرة وشغّل الصوت العربي فيه، وبعدين ارجع هنا.</p>' +
+      '<button data-act="open-tts-settings" data-key="opentts2">فتح إعدادات النطق في أندرويد</button>';
   }
   ENGINES.forEach(function(e, i){
     html += '<button data-act="pick-engine" data-i="' + i + '" data-key="e' + i + '">' +
@@ -1438,6 +1443,15 @@ function handle(act, d){
       rerender(nowOn ? 'الصوت السحابي مفعل.' : 'الصوت السحابي مغلق. جارٍ استخدام صوت الهاتف.', 'tcloud');
       return;
     case 'list-engines': loadEngines(); go('engines'); return;
+    case 'open-tts-settings':
+      var otok = false;
+      try{ if(window.Native && Native.openTtsSettings) otok = Native.openTtsSettings(); }catch(e){}
+      announce(otok ? 'تم فتح إعدادات النطق في أندرويد. ارجع للعبة بعد ما تخلص.'
+                    : 'تعذر فتح إعدادات النطق من هنا. افتحها من إعدادات الهاتف، قسم اللغة والإدخال، ثم إخراج الكلام.', true);
+      return;
+    case 'cloud-status':
+      announce(cloudInfo().statusAr || cloudLabel(), true);
+      return;
     case 'pick-engine': doPickEngine(parseInt(d.i, 10)); return;
     case 'list-cloud-voices': go('cloudVoices'); return;
     case 'pick-cloud-voice': doPickCloudVoice(parseInt(d.i, 10)); return;
@@ -1497,13 +1511,21 @@ function tickTexts(){
 }
 
 /* ---------------- البدء ---------------- */
+function appVersionText(){
+  try{
+    if(window.Native && Native.appVersion) return Native.appVersion() || '';
+  }catch(e){}
+  return '';
+}
 function boot(){
   if(S.music) musicStart();
   render();
   setInterval(tick, 5000);
   setInterval(tickTexts, 1000);
   setInterval(produceTick, 15000);
-  announce('مرحبًا بك في المزرعة السعيدة. لعبة كاملة بالكلام تعمل مع قارئ الشاشة. اضغط بدء يوم جديد للبدء.');
+  var v = appVersionText();
+  announce('مرحبًا بك في المزرعة السعيدة' + (v ? '، الإصدار ' + v : '') +
+    '. لعبة كاملة بالكلام تعمل مع قارئ الشاشة. اضغط بدء يوم جديد للبدء.');
 }
 boot();
 </script>

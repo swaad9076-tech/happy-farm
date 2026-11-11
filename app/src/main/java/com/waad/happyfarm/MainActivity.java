@@ -47,6 +47,8 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOUD_KEY = "cloud_key";
     private static final String KEY_CLOUD_ON = "cloud_on";
     private static final String KEY_CLOUD_VOICE = "cloud_voice";
+    private static final String KEY_CLOUD_MANUAL = "cloud_off_manual";
+    private static final String KEY_QUOTA_DAY = "quota_day";
     private static final String GEMINI_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/"
             + "gemini-2.5-flash-preview-tts:generateContent?key=";
@@ -63,6 +65,7 @@ public class MainActivity extends Activity {
     private MediaPlayer player;
     private int speakSeq = 0;
     private String lastCloudError = "";
+    private boolean cloudWarned = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -263,9 +266,17 @@ public class MainActivity extends Activity {
         return builtinKey;
     }
 
+    /**
+     * الصوت السحابي شغال لو فيه مفتاح (محفوظ أو مدموج) والإنسان ما أطفأهوش بنفسه.
+     * الإعداد القديم cloud_on=false من نسخة سابقة ما يوقفش المفتاح المدموج:
+     * الاعتماد بقى على علم الإطفاء اليدوي وحده.
+     */
     private boolean cloudEnabled() {
-        if (!prefs().contains(KEY_CLOUD_ON)) return !builtinKey().isEmpty();
-        return prefs().getBoolean(KEY_CLOUD_ON, false);
+        if (cloudKey().isEmpty()) return false;
+        if (prefs().getBoolean(KEY_CLOUD_MANUAL, false)) {
+            return prefs().getBoolean(KEY_CLOUD_ON, false);
+        }
+        return true;
     }
 
     private String cloudVoice() {
@@ -291,8 +302,16 @@ public class MainActivity extends Activity {
     }
 
     /** ينطق عبر Gemini: يجلب الملف من الكاش أو يطلبه من الشبكة، ويرجع للمحلي لو فشل. */
+    /** حصة جيميناي المجانية تنتهي، وبعدها ما نضيّعش وقت في طلبات هتترفض. */
+    private boolean quotaBlockedToday() {
+        String d = prefs().getString(KEY_QUOTA_DAY, "");
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                .format(new java.util.Date());
+        return today.equals(d);
+    }
+
     private void cloudSpeak(final String text) {
-        if (!cloudEnabled() || cloudKey().isEmpty() || text.length() > 1500) {
+        if (!cloudEnabled() || cloudKey().isEmpty() || quotaBlockedToday() || text.length() > 1500) {
             localSpeak(text);
             return;
         }
@@ -314,11 +333,42 @@ public class MainActivity extends Activity {
                 pruneCache();
             } catch (Exception e) {
                 lastCloudError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                if (lastCloudError.contains("HTTP 429")) {
+                    String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                            .format(new java.util.Date());
+                    prefs().edit().putString(KEY_QUOTA_DAY, today).apply();
+                }
                 runOnUiThread(() -> {
-                    if (seq == speakSeq) localSpeak(text);
+                    if (seq != speakSeq) return;
+                    localSpeak(warnPrefix() + text);
                 });
             }
         });
+    }
+
+    /** سبب الخطأ بلغة مفهومة، بدل نص إنجليزي زي HTTP 400. */
+    private String cloudReasonAr(String err) {
+        String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
+        if (e.contains("http 400") || e.contains("http 403") || e.contains("api key")) {
+            return "المفتاح مرفوض أو انتهت صلاحيته";
+        }
+        if (e.contains("http 429")) {
+            return "حصة مفتاح جيميناي المجانية خلصت، وهي عشرة طلبات بس في اليوم";
+        }
+        if (e.contains("http 404")) return "خدمة الصوت مش متاحة للمفتاح ده";
+        if (e.contains("unknownhost") || e.contains("timeout") || e.contains("connect")) {
+            return "الإنترنت واصل للتطبيق";
+        }
+        if (e.startsWith("http ")) return "خدمة الصوت رجعت خطأ";
+        return "تعذر تحميل الصوت من الإنترنت";
+    }
+
+    /** تحذير صوتي مرة واحدة في كل تشغيل، قبل الرجوع لصوت الهاتف. */
+    private String warnPrefix() {
+        if (cloudWarned) return "";
+        cloudWarned = true;
+        return "تنبيه من اللعبة: الصوت السحابي فيه مشكلة، " + cloudReasonAr(lastCloudError)
+                + ". هقرأ بصوت الهاتف دلوقتي. تقدر تعرف التفاصيل من الإعدادات، حالة الصوت السحابي. ";
     }
 
     private byte[] synth(String text, String voice) throws Exception {
@@ -481,21 +531,84 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String listEngines() {
             JSONArray arr = new JSONArray();
+            List<String> seen = new ArrayList<>();
             try {
-                if (tts == null) return arr.toString();
-                List<TextToSpeech.EngineInfo> engines = tts.getEngines();
-                for (TextToSpeech.EngineInfo e : engines) {
-                    JSONObject o = new JSONObject();
-                    o.put("pkg", e.name);
-                    String label = e.label == null ? "" : e.label.trim();
-                    if (label.isEmpty()) label = e.name;
-                    o.put("label", label);
-                    o.put("current", e.name.equals(engineUsed));
-                    arr.put(o);
+                if (tts != null) {
+                    List<TextToSpeech.EngineInfo> engines = tts.getEngines();
+                    for (TextToSpeech.EngineInfo e : engines) {
+                        JSONObject o = new JSONObject();
+                        o.put("pkg", e.name);
+                        String label = e.label == null ? "" : e.label.trim();
+                        if (label.isEmpty()) label = e.name;
+                        o.put("label", label);
+                        o.put("current", e.name.equals(engineUsed));
+                        arr.put(o);
+                        seen.add(e.name);
+                    }
                 }
             } catch (Exception ignored) {
             }
+            // لو المحرك ما رجّعش قائمة، نسأل النظام مباشرة عن كل محركات النطق المثبتة.
+            if (arr.length() == 0) {
+                try {
+                    android.content.Intent probe = new android.content.Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE);
+                    List<android.content.pm.ResolveInfo> found =
+                            getPackageManager().queryIntentServices(probe, 0);
+                    for (android.content.pm.ResolveInfo ri : found) {
+                        if (ri.serviceInfo == null) continue;
+                        String pkg = ri.serviceInfo.packageName;
+                        if (pkg == null || seen.contains(pkg)) continue;
+                        JSONObject o = new JSONObject();
+                        o.put("pkg", pkg);
+                        CharSequence lab = ri.serviceInfo.loadLabel(getPackageManager());
+                        String label = lab == null ? "" : lab.toString().trim();
+                        o.put("label", label.isEmpty() ? pkg : label);
+                        o.put("current", pkg.equals(engineUsed));
+                        arr.put(o);
+                        seen.add(pkg);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            // المحرك الشغال لازم يظهر في القائمة حتى لو القائمة رجعت فاضية.
+            if (arr.length() == 0 && engineUsed != null && !engineUsed.isEmpty()) {
+                try {
+                    JSONObject o = new JSONObject();
+                    o.put("pkg", engineUsed);
+                    o.put("label", engineLabel(engineUsed));
+                    o.put("current", true);
+                    arr.put(o);
+                } catch (Exception ignored) {
+                }
+            }
             return arr.toString();
+        }
+
+        /** يفتح إعدادات النطق في أندرويد — لتثبيت الأصوات أو اختيار محرك افتراضي. */
+        @JavascriptInterface
+        public boolean openTtsSettings() {
+            String[] actions = {"com.android.settings.TTS_SETTINGS", android.provider.Settings.ACTION_SETTINGS};
+            for (String a : actions) {
+                try {
+                    android.content.Intent i = new android.content.Intent(a);
+                    i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(i);
+                    return true;
+                } catch (Exception ignored) {
+                }
+            }
+            return false;
+        }
+
+        /** رقم إصدار التطبيق كما هو مثبت على الهاتف. */
+        @JavascriptInterface
+        public String appVersion() {
+            try {
+                android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+                return pi.versionName + " (" + pi.versionCode + ")";
+            } catch (Exception e) {
+                return "?";
+            }
         }
 
         @JavascriptInterface
@@ -539,6 +652,25 @@ public class MainActivity extends Activity {
                         : ("…" + userKey.substring(Math.max(0, userKey.length() - 4))));
                 o.put("voice", cloudVoice());
                 o.put("error", lastCloudError);
+                o.put("errorAr", lastCloudError.isEmpty() ? "" : cloudReasonAr(lastCloudError));
+                String st;
+                if (!o.getBoolean("hasKey")) {
+                    st = "الصوت السحابي مش مفعّل: مفيش مفتاح جوه التطبيق.";
+                } else if (!o.getBoolean("enabled")) {
+                    st = "المفتاح موجود، لكن الصوت السحابي مقفول من الإعدادات.";
+                } else {
+                    st = "الصوت السحابي مفعّل، والمفتاح "
+                            + (o.getBoolean("builtin") ? "مدموج جوه التطبيق" : "محفوظ")
+                            + "، والصوت المختار " + cloudVoice() + ".";
+                    if (quotaBlockedToday()) {
+                        st += " لكن حصة اليوم خلصت، فالتطبيق بيقرأ بصوت الهاتف لحد بكرة.";
+                    } else if (!lastCloudError.isEmpty()) {
+                        st += " لكن آخر محاولة فشلت: " + cloudReasonAr(lastCloudError) + ".";
+                    } else {
+                        st += " لسه مفيش خطأ مسجّل.";
+                    }
+                }
+                o.put("statusAr", st);
             } catch (Exception ignored) {
             }
             return o.toString();
@@ -548,20 +680,29 @@ public class MainActivity extends Activity {
         public boolean setCloudKey(String key) {
             String k = key == null ? "" : key.trim();
             prefs().edit().putString(KEY_CLOUD_KEY, k)
-                    .putBoolean(KEY_CLOUD_ON, !k.isEmpty()).apply();
+                    .putBoolean(KEY_CLOUD_ON, !k.isEmpty())
+                    .putBoolean(KEY_CLOUD_MANUAL, k.isEmpty())
+                    .remove(KEY_QUOTA_DAY).apply();
             lastCloudError = "";
+            cloudWarned = false;
             return !k.isEmpty();
         }
 
         @JavascriptInterface
         public void clearCloudKey() {
-            prefs().edit().remove(KEY_CLOUD_KEY).putBoolean(KEY_CLOUD_ON, false).apply();
+            prefs().edit().remove(KEY_CLOUD_KEY)
+                    .putBoolean(KEY_CLOUD_ON, false)
+                    .putBoolean(KEY_CLOUD_MANUAL, true).apply();
             stopSpeaking();
         }
 
         @JavascriptInterface
         public void setCloudEnabled(boolean on) {
-            prefs().edit().putBoolean(KEY_CLOUD_ON, on).apply();
+            prefs().edit().putBoolean(KEY_CLOUD_ON, on)
+                    .putBoolean(KEY_CLOUD_MANUAL, true)
+                    .remove(KEY_QUOTA_DAY).apply();
+            lastCloudError = "";
+            cloudWarned = false;
             if (!on) stopSpeaking();
         }
 
